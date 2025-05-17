@@ -1,0 +1,146 @@
+{% extends "layouts/base.twig" %}
+
+{% block title %}{{ title }} - Movie Collector{% endblock %}
+
+{% block content %}
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold">{{ title }}</h1>
+            <div class="flex gap-4">
+                {% if movies|length > 0 %}
+                    <button 
+                        onclick="refreshMovies()"
+                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                        Refresh Movie Data
+                    </button>
+                {% endif %}
+                <a href="/movies/search" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Add Movies
+                </a>
+            </div>
+        </div>
+        
+        {% if movies|length > 0 %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                {% for movie in movies %}
+                    <a href="/movies/{{ movie.getTmdbId() }}" 
+                       class="block bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-transform hover:scale-105"
+                       x-data="{ showOverlay: false }">
+                        <div class="relative" @mouseenter="showOverlay = true" @mouseleave="showOverlay = false">
+                            {% if movie.getPosterPath() %}
+                                {% set posterUrl = movie.getLocalPosterPath() ? ('https://moviecollector.test' ~ movie.getLocalPosterPath()) : ('https://image.tmdb.org/t/p/w500' ~ movie.getPosterPath()) %}
+                                <img src="{{ posterUrl }}" alt="{{ movie.getTitle() }}" class="w-full object-cover h-64">
+                            {% else %}
+                                <div class="w-full h-64 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                                    <span class="text-gray-500 dark:text-gray-400">No image</span>
+                                </div>
+                            {% endif %}
+                            
+                            {# Remove format badges from poster overlay #}
+                            
+                            <div x-show="showOverlay" 
+                                 x-cloak 
+                                 class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                                <span class="px-4 py-2 bg-indigo-600 text-white rounded-md font-medium">
+                                    View Details
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div class="p-4">
+                            <h3 class="font-bold text-gray-800 dark:text-white truncate">{{ movie.getTitle() }}</h3>
+                            {% if movie.getReleaseDate() %}
+                                <p class="text-sm text-gray-600 dark:text-gray-400">
+                                    {{ movie.getReleaseDate()|slice(0, 4) }}
+                                </p>
+                            {% endif %}
+                            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                Added {{ movie.getAddedAt()|date("M j, Y") }}
+                            </p>
+                            
+                            {# Add format badges in their own row at the bottom of the info box #}
+                            {% if movie_formats[movie.getTmdbId()] is defined and movie_formats[movie.getTmdbId()]|length > 0 %}
+                                <div class="mt-2 flex flex-wrap gap-1 justify-start">
+                                    {% set max_visible = 5 %}
+                                    {% set formats = movie_formats[movie.getTmdbId()]|slice(0, max_visible) %}
+                                    
+                                    {% for format in formats %}
+                                        <span class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-300 text-xs rounded">
+                                            {{ format }}
+                                        </span>
+                                    {% endfor %}
+                                    
+                                    {% if movie_formats[movie.getTmdbId()]|length > max_visible %}
+                                        <span class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-300 text-xs rounded">
+                                            +{{ movie_formats[movie.getTmdbId()]|length - max_visible }}
+                                        </span>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </a>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
+                <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path>
+                </svg>
+                <h3 class="mt-2 text-lg font-medium text-gray-900 dark:text-white">
+                    {% if list_type == 'collection' %}
+                        No movies in your owned media
+                    {% elseif list_type == 'to_watch' %}
+                        No movies in your watch list
+                    {% else %}
+                        No movies in your buy list
+                    {% endif %}
+                </h3>
+                <p class="mt-1 text-gray-500 dark:text-gray-400">
+                    {% if list_type == 'collection' %}
+                        Get started by searching for movies to add to your owned media.
+                    {% elseif list_type == 'to_watch' %}
+                        Get started by searching for movies you want to watch later.
+                    {% else %}
+                        Get started by searching for movies you plan to buy.
+                    {% endif %}
+                </p>
+                <div class="mt-6">
+                    <a href="/movies/search" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        Search Movies
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshMovies() {
+    if (!confirm('This will refresh all movie data from TMDb. Continue?')) {
+        return;
+    }
+    
+    fetch('/collection/refresh', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': '{{ csrf_token }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            window.location.reload();
+        } else {
+            alert(data.error || 'Failed to refresh movie data');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while refreshing movie data');
+    });
+}
+</script>
+{% endblock %} 

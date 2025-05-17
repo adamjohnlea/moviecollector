@@ -1,0 +1,119 @@
+{% extends "layouts/base.twig" %}
+
+{% block title %}Settings - Movie Collector{% endblock %}
+
+{% block content %}
+    <div class="max-w-2xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6">Account Settings</h1>
+        
+        {% if error is defined and error %}
+            <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
+                <p>{{ error }}</p>
+            </div>
+        {% endif %}
+        
+        {% if success is defined and success %}
+            <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-4" role="alert">
+                <p>{{ success }}</p>
+            </div>
+        {% endif %}
+        
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">TMDb API Credentials</h2>
+            <p class="text-gray-600 dark:text-gray-400 mb-4">
+                To use Movie Collector, you need to provide your TMDb API credentials. 
+                You can get these by signing up at <a href="https://www.themoviedb.org/signup" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">The Movie Database</a>.
+            </p>
+            
+            <form method="post" action="/settings" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                
+                <div>
+                    <label for="tmdb_api_key" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TMDb API Key</label>
+                    <input type="text" id="tmdb_api_key" name="tmdb_api_key" 
+                           value="{{ user_settings.getTmdbApiKey()|default('') }}" 
+                           class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 dark:bg-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        You can find this in your TMDb account settings under the "API" section.
+                    </p>
+                </div>
+                
+                <div>
+                    <label for="tmdb_access_token" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TMDb Access Token (Optional)</label>
+                    <input type="text" id="tmdb_access_token" name="tmdb_access_token" 
+                           value="{{ user_settings.getTmdbAccessToken()|default('') }}" 
+                           class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 dark:bg-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Alternatively, you can use an access token instead of an API key. This is listed as "API Read Access Token" in your TMDb account.
+                    </p>
+                </div>
+                
+                <div>
+                    <button type="submit" class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        Save Settings
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Movie Details Display Preferences</h2>
+            <p class="text-gray-600 dark:text-gray-400 mb-4">
+                Choose which sections to display when viewing movies in your owned collection. These settings only apply to movies marked as "Owned".
+            </p>
+            
+            <form method="post" action="/settings/display-preferences" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% for key, section in sections %}
+                        <div class="flex items-center">
+                            <input type="checkbox" 
+                                   id="show_{{ key }}" 
+                                   name="show_{{ key }}" 
+                                   class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                                   {% if user_settings is defined and user_settings %}
+                                       {% if attribute(user_settings, 'getShow' ~ key|replace({'_': ' '})|title|replace({' ': ''})) %}
+                                           checked
+                                       {% endif %}
+                                   {% else %}
+                                       checked
+                                   {% endif %}>
+                            <label for="show_{{ key }}" class="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                                {{ section.title }}
+                                <span class="text-xs text-gray-500 dark:text-gray-400 block">{{ section.description }}</span>
+                            </label>
+                        </div>
+                    {% endfor %}
+                </div>
+                
+                <div>
+                    <button type="submit" class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        Save Display Preferences
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold mb-4">Account Information</h2>
+            
+            <div class="space-y-4">
+                <div>
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Username</p>
+                    <p class="mt-1">{{ user.getUsername() }}</p>
+                </div>
+                
+                <div>
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Email</p>
+                    <p class="mt-1">{{ user.getEmail() }}</p>
+                </div>
+                
+                <div>
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Account Created</p>
+                    <p class="mt-1">{{ user.getCreatedAt()|date("F j, Y") }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %} 

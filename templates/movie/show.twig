@@ -1,0 +1,1017 @@
+{% extends "layouts/base.twig" %}
+
+{# Helper macro for safely decoding JSON that uses our enhanced json_decode filter #}
+{% macro safe_decode(data) %}
+    {% if data is not null %}
+        {% if data is iterable %}
+            {{ data }}
+        {% else %}
+            {{ data|json_decode|default({}) }}
+        {% endif %}
+    {% else %}
+        {{ {} }}
+    {% endif %}
+{% endmacro %}
+
+{% block title %}{{ movie.title }} - Movie Collector{% endblock %}
+
+{% block content %}
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            {% if movie.backdrop_url %}
+                <div class="relative h-96">
+                    <img src="{{ movie.backdrop_url }}" alt="{{ movie.title }}" class="w-full h-full object-cover">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent"></div>
+                    <div class="absolute bottom-0 left-0 p-8">
+                        <h1 class="text-4xl font-bold text-white mb-2">{{ movie.title }}</h1>
+                        {% if movie.release_date %}
+                            <p class="text-xl text-gray-300">{{ movie.release_date|slice(0, 4) }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% else %}
+                <div class="p-8">
+                    <h1 class="text-4xl font-bold text-gray-900 dark:text-white mb-2">{{ movie.title }}</h1>
+                    {% if movie.release_date %}
+                        <p class="text-xl text-gray-600 dark:text-gray-400">{{ movie.release_date|slice(0, 4) }}</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+            
+            <div class="p-8">
+                <div class="flex flex-col md:flex-row gap-8">
+                    <div class="w-full md:w-1/3">
+                        {% if movie.poster_url %}
+                            <img src="{{ movie.poster_url }}" alt="{{ movie.title }}" class="w-full rounded-lg shadow-md">
+                        {% else %}
+                            <div class="w-full aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+                                <span class="text-gray-400 dark:text-gray-500">No poster available</span>
+                            </div>
+                        {% endif %}
+                        
+                        <div class="mt-6 space-y-4">
+                            {% if in_collection %}
+                                <div class="flex flex-col gap-4">
+                                    <button disabled class="w-full px-4 py-2 bg-green-600 text-white rounded-md font-medium cursor-not-allowed">
+                                        {% if current_list_type == 'collection' %}
+                                            In Owned Media
+                                        {% elseif current_list_type == 'to_watch' %}
+                                            In Watch List
+                                        {% else %}
+                                            In Buy List
+                                        {% endif %}
+                                    </button>
+                                    <form method="post" action="/movies/{{ movie.id }}/remove" 
+                                          x-data="{ 
+                                            submitting: false,
+                                            message: null,
+                                            messageType: null,
+                                            async submitForm(event) {
+                                                event.preventDefault();
+                                                this.submitting = true;
+                                                this.message = null;
+                                                
+                                                try {
+                                                    const form = this.$el;
+                                                    const formData = new FormData(form);
+                                                    
+                                                    const response = await fetch(form.action, {
+                                                        method: 'POST',
+                                                        body: formData
+                                                    });
+                                                    
+                                                    const result = await response.json();
+                                                    
+                                                    if (result.success) {
+                                                        window.location.reload();
+                                                    } else {
+                                                        this.message = result.error || 'An error occurred';
+                                                        this.messageType = 'error';
+                                                        this.submitting = false;
+                                                    }
+                                                } catch (error) {
+                                                    console.error(error);
+                                                    this.message = 'An error occurred while processing your request';
+                                                    this.messageType = 'error';
+                                                    this.submitting = false;
+                                                }
+                                            }
+                                          }" @submit.prevent="submitForm">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <button type="submit" 
+                                                :disabled="submitting"
+                                                class="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                                            <span x-show="!submitting">
+                                                {% if current_list_type == 'collection' %}
+                                                    Remove from Owned Media
+                                                {% elseif current_list_type == 'to_watch' %}
+                                                    Remove from Watch List
+                                                {% else %}
+                                                    Remove from Buy List
+                                                {% endif %}
+                                            </span>
+                                            <span x-show="submitting" x-cloak>Removing...</span>
+                                        </button>
+                                        <div x-show="message" x-cloak>
+                                            <p x-text="message" 
+                                               :class="{
+                                                   'text-red-600': messageType === 'error',
+                                                   'text-green-600': messageType === 'success'
+                                               }"
+                                               class="text-sm mt-2">
+                                            </p>
+                                        </div>
+                                    </form>
+                                </div>
+                            {% else %}
+                                <div class="flex flex-col gap-4" 
+                                     x-data="{ 
+                                        submitting: false, 
+                                        selectedList: 'collection',
+                                        message: null,
+                                        messageType: null,
+                                        async submitForm(event) {
+                                            event.preventDefault();
+                                            this.submitting = true;
+                                            this.message = null;
+                                            
+                                            try {
+                                                const form = event.target;
+                                                const formData = new FormData(form);
+                                                
+                                                const response = await fetch(form.action, {
+                                                    method: 'POST',
+                                                    body: formData
+                                                });
+                                                
+                                                const result = await response.json();
+                                                
+                                                if (result.success) {
+                                                    window.location.reload();
+                                                } else {
+                                                    this.message = result.error || 'An error occurred';
+                                                    this.messageType = 'error';
+                                                    this.submitting = false;
+                                                }
+                                            } catch (error) {
+                                                console.error(error);
+                                                this.message = 'An error occurred while processing your request';
+                                                this.messageType = 'error';
+                                                this.submitting = false;
+                                            }
+                                        }
+                                     }">
+                                    <select x-model="selectedList" 
+                                            class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white">
+                                        <option value="collection">Add to Owned Media</option>
+                                        <option value="to_watch">Add to Watch List</option>
+                                        <option value="to_buy">Add to Buy List</option>
+                                    </select>
+                                    
+                                    <form method="post" 
+                                          action="/movies/{{ movie.id }}/add" 
+                                          @submit.prevent="submitForm">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <input type="hidden" name="list_type" x-bind:value="selectedList">
+                                        <button type="submit" 
+                                                :disabled="submitting"
+                                                class="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                                            Add to List
+                                        </button>
+                                    </form>
+                                    
+                                    <div x-show="message" x-cloak>
+                                        <p x-text="message" 
+                                           :class="{
+                                               'text-red-600': messageType === 'error',
+                                               'text-green-600': messageType === 'success'
+                                           }"
+                                           class="text-sm mt-2">
+                                        </p>
+                                    </div>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="w-full md:w-2/3">
+                        <!-- Accordion Container -->
+                        <div class="mt-8 space-y-6" x-data="{
+                            activeSection: {% if is_owned %}'collection_details'{% else %}'overview'{% endif %},
+                            toggle(section) {
+                                this.activeSection = this.activeSection === section ? null : section;
+                            },
+                            isOpen(section) {
+                                return this.activeSection === section;
+                            }
+                        }">
+                            <!-- Overview Section -->
+                            {% if sections.overview.visible is not defined or sections.overview.visible %}
+                            <div class="mb-6">
+                                <div @click="toggle('overview')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.overview.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('overview')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('overview')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% if movie.overview %}
+                                        <p class="text-gray-700 dark:text-gray-300 text-lg leading-relaxed mb-4">{{ movie.overview }}</p>
+                                    {% endif %}
+                                    
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {% if movie.genres and movie.genres|length > 0 %}
+                                            <div>
+                                                <h3 class="text-lg font-semibold mb-2">Genres</h3>
+                                                <div class="flex flex-wrap gap-2">
+                                                    {% for genre in movie.genres %}
+                                                        <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">
+                                                            {{ genre.name }}
+                                                        </span>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                        {% endif %}
+                                        
+                                        {% if movie.runtime %}
+                                            <div>
+                                                <h3 class="text-lg font-semibold mb-2">Runtime</h3>
+                                                <p>{{ movie.runtime }} minutes</p>
+                                            </div>
+                                        {% endif %}
+                                        
+                                        {% if movie.vote_average %}
+                                            <div>
+                                                <h3 class="text-lg font-semibold mb-2">Rating</h3>
+                                                <div class="flex items-center">
+                                                    <svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                                                    </svg>
+                                                    <span class="ml-1">{{ movie.vote_average|number_format(1) }}/10</span>
+                                                    {% if movie.vote_count %}
+                                                        <span class="ml-2 text-sm text-gray-500 dark:text-gray-400">({{ movie.vote_count }} votes)</span>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        {% endif %}
+                                        
+                                        {% if movie.release_date %}
+                                            <div>
+                                                <h3 class="text-lg font-semibold mb-2">Release Date</h3>
+                                                <p>{{ movie.release_date|date("F j, Y") }}</p>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Cast & Crew Section -->
+                            {% if sections.cast_crew.loaded and (sections.cast_crew.visible is not defined or sections.cast_crew.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('cast_crew')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.cast_crew.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('cast_crew')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('cast_crew')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set credits = movie.credits|json_decode|default({}) %}
+                                    {% if credits is not null and credits.cast is defined and credits.cast is not empty %}
+                                        <div class="mb-6">
+                                            <h3 class="text-lg font-semibold mb-4">Cast</h3>
+                                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                                                {% for actor in credits.cast|slice(0, 8) %}
+                                                    <div class="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                                                        <div class="font-medium">{{ actor.name }}</div>
+                                                        <div class="text-sm text-gray-600 dark:text-gray-400">{{ actor.character }}</div>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                    
+                                    {% if credits is not null and credits.crew is defined and credits.crew is not empty %}
+                                        {% set directors = [] %}
+                                        {% set producers = [] %}
+                                        {% set writers = [] %}
+                                        
+                                        {% for person in credits.crew %}
+                                            {% if person.job == 'Director' %}
+                                                {% set directors = directors|merge([person]) %}
+                                            {% elseif person.job == 'Producer' or person.job == 'Executive Producer' %}
+                                                {% set producers = producers|merge([person]) %}
+                                            {% elseif person.department == 'Writing' %}
+                                                {% set writers = writers|merge([person]) %}
+                                            {% endif %}
+                                        {% endfor %}
+                                        
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {% if directors|length > 0 %}
+                                                <div>
+                                                    <h3 class="text-lg font-semibold mb-2">Director(s)</h3>
+                                                    <ul class="space-y-1">
+                                                        {% for director in directors %}
+                                                            <li>{{ director.name }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                </div>
+                                            {% endif %}
+                                            
+                                            {% if writers|length > 0 %}
+                                                <div>
+                                                    <h3 class="text-lg font-semibold mb-2">Writer(s)</h3>
+                                                    <ul class="space-y-1">
+                                                        {% for writer in writers %}
+                                                            <li>{{ writer.name }} ({{ writer.job }})</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Similar Movies Section -->
+                            {% if sections.similar.loaded and (sections.similar.visible is not defined or sections.similar.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('similar')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.similar.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('similar')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('similar')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set similar_movies = movie.similar|json_decode|default({}) %}
+                                    {% if similar_movies is not null and similar_movies.results is defined and similar_movies.results is not empty %}
+                                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                                            {% for similar in similar_movies.results|slice(0, 8) %}
+                                                <a href="/movies/{{ similar.id }}" class="block group">
+                                                    <div class="aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden">
+                                                        {% if similar.poster_path %}
+                                                            <img src="https://image.tmdb.org/t/p/w342{{ similar.poster_path }}" 
+                                                                 alt="{{ similar.title }}" 
+                                                                 class="w-full h-full object-cover group-hover:opacity-75 transition-opacity">
+                                                        {% else %}
+                                                            <div class="w-full h-full flex items-center justify-center text-gray-400">
+                                                                No poster
+                                                            </div>
+                                                        {% endif %}
+                                                    </div>
+                                                    <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ similar.title }}</h3>
+                                                    {% if similar.release_date %}
+                                                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ similar.release_date|slice(0, 4) }}</p>
+                                                    {% endif %}
+                                                </a>
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <p class="text-gray-600 dark:text-gray-400">No similar movies found.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Additional Information Section -->
+                            {% if sections.more_info.visible is not defined or sections.more_info.visible %}
+                            <div class="mb-6">
+                                <div @click="toggle('more_info')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.more_info.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('more_info')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('more_info')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        <!-- Financial Information -->
+                                        <div>
+                                            <h3 class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Financial</h3>
+                                            <div class="space-y-3">
+                                                {% if movie.budget is defined and movie.budget %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Budget:</span>
+                                                        <span class="ml-2">${{ (movie.budget/1000000)|number_format(1) }} million</span>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.revenue is defined and movie.revenue %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Revenue:</span>
+                                                        <span class="ml-2">${{ (movie.revenue/1000000)|number_format(1) }} million</span>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Additional Details -->
+                                        <div>
+                                            <h3 class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Details</h3>
+                                            <div class="space-y-3">
+                                                {% if movie.tagline is defined and movie.tagline %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Tagline:</span>
+                                                        <span class="ml-2 italic">{{ movie.tagline }}</span>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.status is defined and movie.status %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Status:</span>
+                                                        <span class="ml-2">{{ movie.status }}</span>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.imdb_id is defined and movie.imdb_id %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">IMDB ID:</span>
+                                                        <a href="https://www.imdb.com/title/{{ movie.imdb_id }}" target="_blank" rel="noopener" class="ml-2 text-indigo-600 dark:text-indigo-400 hover:underline">{{ movie.imdb_id }}</a>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.homepage is defined and movie.homepage %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Homepage:</span>
+                                                        <a href="{{ movie.homepage }}" target="_blank" rel="noopener" class="ml-2 text-indigo-600 dark:text-indigo-400 hover:underline">Official Website</a>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.popularity is defined and movie.popularity %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Popularity:</span>
+                                                        <span class="ml-2">{{ movie.popularity|number_format(1) }}</span>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.adult is defined %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Adult Content:</span>
+                                                        <span class="ml-2">{{ movie.adult ? 'Yes' : 'No' }}</span>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.video is defined %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Video Release:</span>
+                                                        <span class="ml-2">{{ movie.video ? 'Yes' : 'No' }}</span>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- International Information -->
+                                        <div>
+                                            <h3 class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">International</h3>
+                                            <div class="space-y-3">
+                                                {% if movie.original_language is defined and movie.original_language %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Original Language:</span>
+                                                        <span class="ml-2">{{ movie.original_language|upper }}</span>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.spoken_languages is defined and movie.spoken_languages %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Spoken Languages:</span>
+                                                        <div class="mt-1 flex flex-wrap gap-2">
+                                                            {% set languagesData = movie.spoken_languages|json_decode|default([]) %}
+                                                            {% if languagesData is not null and languagesData is not empty %}
+                                                                {% for language in languagesData %}
+                                                                    <span class="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs">
+                                                                        {{ language.english_name ?? language.name }}
+                                                                    </span>
+                                                                {% endfor %}
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                {% endif %}
+                                                
+                                                {% if movie.production_countries is defined and movie.production_countries %}
+                                                    <div>
+                                                        <span class="text-gray-600 dark:text-gray-400">Production Countries:</span>
+                                                        <div class="mt-1 flex flex-wrap gap-2">
+                                                            {% set countriesData = movie.production_countries|json_decode|default([]) %}
+                                                            {% if countriesData is not null and countriesData is not empty %}
+                                                                {% for country in countriesData %}
+                                                                    <span class="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs">
+                                                                        {{ country.name }}
+                                                                    </span>
+                                                                {% endfor %}
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Watch Providers Section -->
+                            {% if sections.watch.loaded and (sections.watch.visible is not defined or sections.watch.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('watch')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.watch.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('watch')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('watch')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set watch_providers = movie.watch_providers|json_decode|default({}) %}
+                                    {% if watch_providers is not null and watch_providers.US is defined %}
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                                            {% if watch_providers.US.flatrate is defined %}
+                                                <div>
+                                                    <h3 class="text-md font-medium mb-2">Stream</h3>
+                                                    <div class="flex flex-wrap gap-2">
+                                                        {% for provider in watch_providers.US.flatrate %}
+                                                            <div class="flex items-center px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">
+                                                                {% if provider.logo_path %}
+                                                                    <img src="https://image.tmdb.org/t/p/w45{{ provider.logo_path }}" alt="{{ provider.provider_name }}" class="w-6 h-6 rounded-full mr-2">
+                                                                {% endif %}
+                                                                {{ provider.provider_name }}
+                                                            </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                            
+                                            {% if watch_providers.US.rent is defined %}
+                                                <div>
+                                                    <h3 class="text-md font-medium mb-2">Rent</h3>
+                                                    <div class="flex flex-wrap gap-2">
+                                                        {% for provider in watch_providers.US.rent %}
+                                                            <div class="flex items-center px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">
+                                                                {% if provider.logo_path %}
+                                                                    <img src="https://image.tmdb.org/t/p/w45{{ provider.logo_path }}" alt="{{ provider.provider_name }}" class="w-6 h-6 rounded-full mr-2">
+                                                                {% endif %}
+                                                                {{ provider.provider_name }}
+                                                            </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                            
+                                            {% if watch_providers.US.buy is defined %}
+                                                <div>
+                                                    <h3 class="text-md font-medium mb-2">Buy</h3>
+                                                    <div class="flex flex-wrap gap-2">
+                                                        {% for provider in watch_providers.US.buy %}
+                                                            <div class="flex items-center px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">
+                                                                {% if provider.logo_path %}
+                                                                    <img src="https://image.tmdb.org/t/p/w45{{ provider.logo_path }}" alt="{{ provider.provider_name }}" class="w-6 h-6 rounded-full mr-2">
+                                                                {% endif %}
+                                                                {{ provider.provider_name }}
+                                                            </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    {% else %}
+                                        <p class="text-gray-600 dark:text-gray-400">No streaming information available for this movie.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Videos Section -->
+                            {% if sections.videos.loaded and (sections.videos.visible is not defined or sections.videos.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('videos')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.videos.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('videos')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('videos')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set videos_data = movie.videos|json_decode|default({}) %}
+                                    {% if videos_data is not null and videos_data.results is defined and videos_data.results is not empty %}
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {% for video in videos_data.results|slice(0, 4) %}
+                                                {% if video.site == 'YouTube' %}
+                                                    <div class="aspect-video">
+                                                        <iframe 
+                                                            class="w-full h-full rounded-lg"
+                                                            src="https://www.youtube.com/embed/{{ video.key }}"
+                                                            title="{{ video.name }}"
+                                                            frameborder="0"
+                                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                                            allowfullscreen
+                                                        ></iframe>
+                                                    </div>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <p class="text-gray-600 dark:text-gray-400">No videos available.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Images Gallery Section -->
+                            {% if sections.images.loaded and (sections.images.visible is not defined or sections.images.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('images')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.images.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('images')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('images')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set images_data = movie.images|json_decode|default({}) %}
+                                    {% if images_data is not null %}
+                                        {% if images_data.backdrops is defined and images_data.backdrops is not empty %}
+                                            <h3 class="text-lg font-semibold mb-4">Backdrops</h3>
+                                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-6">
+                                                {% for backdrop in images_data.backdrops|slice(0, 8) %}
+                                                    <a href="https://image.tmdb.org/t/p/original{{ backdrop.file_path }}" 
+                                                       class="block aspect-video bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden"
+                                                       target="_blank">
+                                                        <img src="https://image.tmdb.org/t/p/w500{{ backdrop.file_path }}" 
+                                                             alt="Movie backdrop" 
+                                                             class="w-full h-full object-cover hover:opacity-75 transition-opacity">
+                                                    </a>
+                                                {% endfor %}
+                                            </div>
+                                        {% endif %}
+                                        
+                                        {% if images_data.posters is defined and images_data.posters is not empty %}
+                                            <h3 class="text-lg font-semibold mb-4">Posters</h3>
+                                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                                {% for poster in images_data.posters|slice(0, 10) %}
+                                                    <a href="https://image.tmdb.org/t/p/original{{ poster.file_path }}" 
+                                                       class="block aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden"
+                                                       target="_blank">
+                                                        <img src="https://image.tmdb.org/t/p/w342{{ poster.file_path }}" 
+                                                             alt="Movie poster" 
+                                                             class="w-full h-full object-cover hover:opacity-75 transition-opacity">
+                                                    </a>
+                                                {% endfor %}
+                                            </div>
+                                        {% endif %}
+                                    {% else %}
+                                        <p class="text-gray-600 dark:text-gray-400">No images available.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Recommendations Section -->
+                            {% if sections.recommendations.loaded and (sections.recommendations.visible is not defined or sections.recommendations.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('recommendations')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.recommendations.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('recommendations')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('recommendations')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set recommendation_data = movie.recommendations|json_decode|default({}) %}
+                                    {% if recommendation_data is not null and recommendation_data.results is defined and recommendation_data.results is not empty %}
+                                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                                            {% for rec in recommendation_data.results|slice(0, 8) %}
+                                                <a href="/movies/{{ rec.id }}" class="block group">
+                                                    <div class="aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden">
+                                                        {% if rec.poster_path %}
+                                                            <img src="https://image.tmdb.org/t/p/w342{{ rec.poster_path }}" 
+                                                                 alt="{{ rec.title }}" 
+                                                                 class="w-full h-full object-cover group-hover:opacity-75 transition-opacity">
+                                                        {% else %}
+                                                            <div class="w-full h-full flex items-center justify-center text-gray-400">
+                                                                No poster
+                                                            </div>
+                                                        {% endif %}
+                                                    </div>
+                                                    <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ rec.title }}</h3>
+                                                    {% if rec.release_date %}
+                                                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ rec.release_date|slice(0, 4) }}</p>
+                                                    {% endif %}
+                                                </a>
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <p class="text-gray-600 dark:text-gray-400">No recommendations available.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- Reviews Section -->
+                            {% if sections.reviews.loaded and (sections.reviews.visible is not defined or sections.reviews.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('reviews')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.reviews.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('reviews')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('reviews')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set reviews_data = movie.reviews|json_decode|default({}) %}
+                                    {% if reviews_data is not null and reviews_data.results is defined and reviews_data.results is not empty %}
+                                        <div class="space-y-6">
+                                            {% for review in reviews_data.results|slice(0, 5) %}
+                                                <div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                                                    <div class="flex items-center mb-3">
+                                                        <div class="font-medium">{{ review.author }}</div>
+                                                        {% if review.author_details and review.author_details.rating %}
+                                                            <div class="ml-4 flex items-center">
+                                                                <svg class="h-4 w-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                                                                </svg>
+                                                                <span class="ml-1 text-sm">{{ review.author_details.rating }}/10</span>
+                                                            </div>
+                                                        {% endif %}
+                                                    </div>
+                                                    
+                                                    {% if review.content %}
+                                                        <div class="text-gray-700 dark:text-gray-300">
+                                                            {% if review.content|length > 300 %}
+                                                                <div x-data="{ expanded: false }">
+                                                                    <div x-show="!expanded">
+                                                                        {{ review.content|slice(0, 300) }}...
+                                                                        <button @click="expanded = true" class="text-indigo-600 dark:text-indigo-400 hover:underline text-sm ml-1">Read more</button>
+                                                                    </div>
+                                                                    <div x-show="expanded" x-cloak>
+                                                                        {{ review.content }}
+                                                                        <button @click="expanded = false" class="text-indigo-600 dark:text-indigo-400 hover:underline text-sm ml-1">Show less</button>
+                                                                    </div>
+                                                                </div>
+                                                            {% else %}
+                                                                {{ review.content }}
+                                                            {% endif %}
+                                                        </div>
+                                                    {% endif %}
+                                                    
+                                                    {% if review.created_at %}
+                                                        <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                                                            {{ review.created_at|date("F j, Y") }}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <p class="text-gray-600 dark:text-gray-400">No reviews available.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- External IDs Section -->
+                            {% if sections.externalIds.loaded and (sections.externalIds.visible is not defined or sections.externalIds.visible) %}
+                            <div class="mb-6">
+                                <div @click="toggle('externalIds')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        {{ sections.externalIds.title }}
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('externalIds')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('externalIds')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    {% set externalIds_data = movie.external_ids|json_decode|default({}) %}
+                                    {% if externalIds_data is not null %}
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            {% if externalIds_data.imdb_id is defined and externalIds_data.imdb_id %}
+                                                <a href="https://www.imdb.com/title/{{ externalIds_data.imdb_id }}" 
+                                                   target="_blank" 
+                                                   class="flex items-center p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                                                    <span class="font-semibold text-yellow-500">IMDb</span>
+                                                    <span class="ml-3 text-gray-700 dark:text-gray-300">{{ externalIds_data.imdb_id }}</span>
+                                                </a>
+                                            {% endif %}
+                                            
+                                            {% if externalIds_data.facebook_id is defined and externalIds_data.facebook_id %}
+                                                <a href="https://www.facebook.com/{{ externalIds_data.facebook_id }}" 
+                                                   target="_blank" 
+                                                   class="flex items-center p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                                                    <span class="font-semibold text-blue-600">Facebook</span>
+                                                    <span class="ml-3 text-gray-700 dark:text-gray-300">View Page</span>
+                                                </a>
+                                            {% endif %}
+                                            
+                                            {% if externalIds_data.instagram_id is defined and externalIds_data.instagram_id %}
+                                                <a href="https://www.instagram.com/{{ externalIds_data.instagram_id }}" 
+                                                   target="_blank" 
+                                                   class="flex items-center p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                                                    <span class="font-semibold text-purple-600">Instagram</span>
+                                                    <span class="ml-3 text-gray-700 dark:text-gray-300">View Profile</span>
+                                                </a>
+                                            {% endif %}
+                                            
+                                            {% if externalIds_data.twitter_id is defined and externalIds_data.twitter_id %}
+                                                <a href="https://twitter.com/{{ externalIds_data.twitter_id }}" 
+                                                   target="_blank" 
+                                                   class="flex items-center p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                                                    <span class="font-semibold text-blue-400">Twitter</span>
+                                                    <span class="ml-3 text-gray-700 dark:text-gray-300">@{{ externalIds_data.twitter_id }}</span>
+                                                </a>
+                                            {% endif %}
+                                        </div>
+                                    {% else %}
+                                        <p class="text-gray-600 dark:text-gray-400">No external IDs available.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <!-- My Collection Details Section - Only shown for owned movies -->
+                            {% if is_owned %}
+                            <div class="mb-6">
+                                <div @click="toggle('collection_details')"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                                        My Collection Details
+                                    </h2>
+                                    <svg :class="{'rotate-180': isOpen('collection_details')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                
+                                <div x-show="isOpen('collection_details')" 
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    
+                                    <!-- Formats Section -->
+                                    <div class="mb-4">
+                                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-3">Formats Owned</h3>
+                                        
+                                        <form id="formats-form" action="/movies/{{ movie.id }}/formats" method="post">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            
+                                            {% if not all_formats is defined or all_formats is empty %}
+                                                <p class="text-gray-600 dark:text-gray-400">No format options available.</p>
+                                            {% else %}
+                                                <div class="space-y-4">
+                                                    {% for category, formats in all_formats %}
+                                                        <div class="border dark:border-gray-700 rounded-lg p-3">
+                                                            <h4 class="text-md font-medium text-gray-800 dark:text-gray-200 mb-2">{{ category }}</h4>
+                                                            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                                                {% for format in formats %}
+                                                                    <div class="flex items-start">
+                                                                        <input type="checkbox" 
+                                                                               id="format_{{ format.id }}" 
+                                                                               name="formats[]" 
+                                                                               value="{{ format.id }}"
+                                                                               {% if user_formats is defined and user_formats|length > 0 and format.id in user_formats|map(f => f.id) %}
+                                                                               checked
+                                                                               {% endif %}
+                                                                               class="h-4 w-4 mt-1 text-indigo-600 focus:ring-indigo-500 rounded">
+                                                                        <label for="format_{{ format.id }}" class="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                                                                            {{ format.name }}
+                                                                            {% if format.description %}
+                                                                                <span class="text-xs text-gray-500 dark:text-gray-400 block">{{ format.description }}</span>
+                                                                            {% endif %}
+                                                                        </label>
+                                                                    </div>
+                                                                {% endfor %}
+                                                            </div>
+                                                        </div>
+                                                    {% endfor %}
+                                                </div>
+                                                
+                                                <div class="mt-4">
+                                                    <button type="submit" 
+                                                            class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                                        Save Formats
+                                                    </button>
+                                                </div>
+                                            {% endif %}
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-8 flex justify-between">
+            <a href="/movies/search" class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                Back to Search
+            </a>
+            <a href="/collection" class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                View Collection
+            </a>
+        </div>
+    </div>
+{% endblock %} 

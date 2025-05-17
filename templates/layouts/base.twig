@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Movie Collector{% endblock %}</title>
+    <!-- Tailwind CSS via CDN for now (will be compiled in production) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js for interactive components -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+    <header class="bg-indigo-600 shadow-md" x-data="{ mobileMenuOpen: false }">
+        <div class="container mx-auto px-4">
+            <nav class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/" class="text-white text-xl font-bold">Movie Collector</a>
+                </div>
+                
+                <!-- Desktop Navigation -->
+                <div class="hidden md:flex items-center space-x-4">
+                    {% if current_user %}
+                        <nav class="flex space-x-4">
+                            <a href="/collection" class="text-white hover:text-indigo-200 {{ current_route == '/collection' ? 'font-semibold' : '' }}">
+                                Owned Media
+                            </a>
+                            <a href="/to-watch" class="text-white hover:text-indigo-200 {{ current_route == '/to-watch' ? 'font-semibold' : '' }}">
+                                To Watch
+                            </a>
+                            <a href="/to-buy" class="text-white hover:text-indigo-200 {{ current_route == '/to-buy' ? 'font-semibold' : '' }}">
+                                To Buy
+                            </a>
+                            <a href="/movies/search" class="text-white hover:text-indigo-200 {{ current_route starts with '/movies/search' ? 'font-semibold' : '' }}">
+                                Search
+                            </a>
+                        </nav>
+                        <div class="relative ml-4" x-data="{ open: false }" @click.away="open = false">
+                            <button @click="open = !open" class="flex items-center text-white hover:text-indigo-200">
+                                <span>{{ current_user.getUsername() }}</span>
+                                <svg class="ml-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                            </button>
+                            <div x-cloak x-show="open" class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg py-1 z-10">
+                                <a href="/settings" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Settings</a>
+                                <a href="/logout" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Logout</a>
+                            </div>
+                        </div>
+                    {% else %}
+                        <a href="/login" class="text-white hover:text-indigo-200">Login</a>
+                        <a href="/register" class="bg-white text-indigo-600 px-4 py-2 rounded hover:bg-indigo-100">Register</a>
+                    {% endif %}
+                </div>
+
+                <!-- Mobile menu button -->
+                <div class="md:hidden">
+                    <button @click="mobileMenuOpen = !mobileMenuOpen" class="inline-flex items-center justify-center p-2 rounded-md text-white hover:text-indigo-200 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white">
+                        <span class="sr-only">Open main menu</span>
+                        <svg x-show="!mobileMenuOpen" class="block h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                        <svg x-show="mobileMenuOpen" x-cloak class="block h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Mobile menu -->
+        <div x-show="mobileMenuOpen" x-cloak class="md:hidden bg-indigo-700">
+            <div class="px-2 pt-2 pb-3 space-y-1">
+                {% if current_user %}
+                    <a href="/collection" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800 {{ current_route == '/collection' ? 'bg-indigo-800 font-semibold' : '' }}">
+                        Owned Media
+                    </a>
+                    <a href="/to-watch" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800 {{ current_route == '/to-watch' ? 'bg-indigo-800 font-semibold' : '' }}">
+                        To Watch
+                    </a>
+                    <a href="/to-buy" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800 {{ current_route == '/to-buy' ? 'bg-indigo-800 font-semibold' : '' }}">
+                        To Buy
+                    </a>
+                    <a href="/movies/search" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800 {{ current_route starts with '/movies/search' ? 'bg-indigo-800 font-semibold' : '' }}">
+                        Search
+                    </a>
+                    <div class="border-t border-indigo-800 mt-2 pt-2">
+                        <a href="/settings" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800">Settings</a>
+                        <a href="/logout" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800">Logout</a>
+                    </div>
+                {% else %}
+                    <a href="/login" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800">Login</a>
+                    <a href="/register" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-gray-200 dark:bg-gray-800 py-4 mt-12">
+        <div class="container mx-auto px-4 text-center text-gray-600 dark:text-gray-400">
+            <p>Movie Collector &copy; {{ "now"|date("Y") }}</p>
+            <p class="text-sm mt-1">Powered by <a href="https://www.themoviedb.org/" class="text-indigo-600 dark:text-indigo-400 hover:underline">The Movie Database API</a></p>
+        </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+    
+    <script>
+        // Debug and fix for login/register links
+        document.addEventListener('DOMContentLoaded', function() {
+            // Fix for login and register links if Alpine.js is not handling them properly
+            const loginLink = document.querySelector('a[href="/login"]');
+            const registerLink = document.querySelector('a[href="/register"]');
+            
+            if (loginLink) {
+                loginLink.addEventListener('click', function(e) {
+                    window.location.href = '/login';
+                });
+            }
+            
+            if (registerLink) {
+                registerLink.addEventListener('click', function(e) {
+                    window.location.href = '/register';
+                });
+            }
+            
+            console.log('Login/register link fix applied');
+        });
+    </script>
+</body>
+</html> 

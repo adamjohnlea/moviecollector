@@ -1,0 +1,22 @@
+{
+    "name": "moviecollector/app",
+    "description": "Movie collection application with TMDb integration",
+    "type": "project",
+    "require": {
+        "php": "^8.4",
+        "twig/twig": "^3.7",
+        "guzzlehttp/guzzle": "^7.7",
+        "symfony/http-foundation": "^6.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Movie Collector"
+        }
+    ],
+    "minimum-stability": "stable"
+} 

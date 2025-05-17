@@ -1,0 +1,68 @@
+{% extends "layouts/base.twig" %}
+
+{% block title %}{{ status_code }} {{ status_text }} - Movie Collector{% endblock %}
+
+{% block content %}
+    <div class="max-w-4xl mx-auto px-4 py-12 text-center">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8">
+            <h1 class="text-6xl font-bold text-red-500 mb-4">{{ status_code }}</h1>
+            <h2 class="text-2xl font-semibold mb-6">{{ status_text }}</h2>
+            
+            <div class="mb-8 text-gray-600 dark:text-gray-400">
+                {% if status_code == 404 %}
+                    <p>The page you're looking for doesn't exist or has been moved.</p>
+                {% elseif status_code == 403 %}
+                    <p>You don't have permission to access this resource.</p>
+                {% elseif status_code == 500 %}
+                    <p>Something went wrong on our end. Please try again later.</p>
+                {% elseif status_code == 401 %}
+                    <p>You need to be logged in to access this page.</p>
+                {% else %}
+                    <p>{{ error_message|default('An error occurred while processing your request.') }}</p>
+                {% endif %}
+            </div>
+            
+            <div class="flex flex-col sm:flex-row justify-center gap-4">
+                <a href="/" class="inline-flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
+                    <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                    </svg>
+                    Return Home
+                </a>
+                
+                {% if status_code == 401 %}
+                    <a href="/login" class="inline-flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200">
+                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                        </svg>
+                        Log In
+                    </a>
+                {% elseif status_code == 404 %}
+                    <button onclick="window.history.back()" class="inline-flex items-center justify-center px-5 py-3 border border-gray-300 dark:border-gray-600 text-base font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                        </svg>
+                        Go Back
+                    </button>
+                {% endif %}
+            </div>
+        </div>
+        
+        {% if debug and exception %}
+            <div class="mt-8 bg-gray-100 dark:bg-gray-900 rounded-lg shadow-md p-6 text-left overflow-x-auto">
+                <h3 class="text-lg font-semibold mb-4">Debug Information</h3>
+                <div class="mb-4">
+                    <p class="font-mono text-sm">{{ exception.message }}</p>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                        <span class="font-semibold">File:</span> {{ exception.file }}:{{ exception.line }}
+                    </p>
+                </div>
+                
+                {% if exception.trace %}
+                    <h4 class="text-md font-semibold mb-2">Stack Trace:</h4>
+                    <pre class="bg-gray-200 dark:bg-gray-800 p-4 rounded text-sm font-mono overflow-x-auto">{{ exception.trace }}</pre>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+{% endblock %} 

@@ -35,6 +35,14 @@ use Symfony\Component\HttpFoundation\Request;
 // Create the request from globals
 $request = Request::createFromGlobals();
 
+// Attach per-request logging context
+$rid = bin2hex(random_bytes(8));
+\App\Services\LoggerService::setBaseContext([
+    'request_id' => $rid,
+    'method' => $request->getMethod(),
+    'path' => $request->getPathInfo(),
+]);
+
 // Initialize the router
 $router = new Router();
 

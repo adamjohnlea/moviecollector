@@ -47,7 +47,7 @@ class MovieController extends Controller
         // Check if user is logged in
         $redirect = $this->requireLogin();
         if ($redirect) {
-            error_log("[Movie Search] User not logged in");
+            LoggerService::warning('[Movie] User not logged in');
             return $redirect;
         }
         

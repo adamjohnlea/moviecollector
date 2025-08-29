@@ -7,8 +7,26 @@ use App\Services\LoggerService as Logger;
 
 class ImageCache
 {
+    // Keep existing public uploads for minimal change, but we will validate strictly before writing.
     private const POSTER_DIR = __DIR__ . '/../../public/uploads/posters';
     private const BACKDROP_DIR = __DIR__ . '/../../public/uploads/backdrops';
+
+    // Allowed remote hosts for images (TMDb secure image CDN)
+    private const ALLOWED_HOSTS = ['image.tmdb.org'];
+
+    // Allowed mime types and their preferred extensions
+    private const MIME_EXT = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp',
+    ];
+
+    // Max download size in bytes (e.g., 5 MB)
+    private const MAX_BYTES = 5_242_880; // 5 MB
+
+    // HTTP timeouts
+    private const TIMEOUT = 10.0; // seconds
+    private const CONNECT_TIMEOUT = 5.0; // seconds
     
     /**
      * Cache an image from a URL
@@ -22,111 +40,151 @@ class ImageCache
                 'memory_limit' => ini_get('memory_limit'),
                 'max_execution_time' => ini_get('max_execution_time')
             ]);
-            
-            // Generate a unique filename based on the URL
-            $filename = md5($url) . '.jpg';
-            $directory = $type === 'poster' ? self::POSTER_DIR : self::BACKDROP_DIR;
-            $directory = realpath($directory) ?: $directory;
-            $localPath = $directory . DIRECTORY_SEPARATOR . $filename;
-            
-            Logger::info("Generated paths", [
-                'directory' => $directory,
-                'directory_exists' => is_dir($directory) ? 'yes' : 'no',
-                'directory_writable' => is_writable($directory) ? 'yes' : 'no',
-                'localPath' => $localPath,
-                'filename' => $filename
-            ]);
-            
-            // If file already exists and is readable, return its path
-            if (is_readable($localPath)) {
-                Logger::info("Image already cached", [
-                    'path' => $localPath,
-                    'size' => filesize($localPath)
-                ]);
-                return '/uploads/' . ($type === 'poster' ? 'posters/' : 'backdrops/') . $filename;
+
+            // Validate type
+            $type = ($type === 'backdrop') ? 'backdrop' : 'poster';
+
+            // Parse and validate URL against allowlist
+            $parts = parse_url($url);
+            if (!$parts || !isset($parts['scheme'], $parts['host'])) {
+                Logger::warning('Invalid URL for image cache', ['url' => $url]);
+                return null;
             }
-            
-            // Download and save the image
-            $context = stream_context_create([
-                'http' => [
-                    'timeout' => 30,
-                    'user_agent' => 'MovieCollector/1.0',
-                    'follow_location' => true
-                ],
-                'ssl' => [
-                    'verify_peer' => false,
-                    'verify_peer_name' => false
-                ]
-            ]);
-            
-            Logger::info("Attempting to download image", [
-                'url' => $url,
-                'context' => stream_context_get_options($context)
-            ]);
-            
-            $imageData = @file_get_contents($url, false, $context);
-            
-            if ($imageData === false) {
-                $error = error_get_last();
-                Logger::error("Failed to download image", [
-                    'url' => $url,
-                    'error_message' => $error['message'] ?? 'Unknown error',
-                    'error_type' => $error['type'] ?? 'Unknown type',
-                    'error_file' => $error['file'] ?? 'Unknown file',
-                    'error_line' => $error['line'] ?? 'Unknown line'
+            $host = strtolower($parts['host']);
+            $isAllowed = in_array($host, self::ALLOWED_HOSTS, true);
+            if (!$isAllowed) {
+                Logger::warning('Blocked image download due to host not in allowlist', [
+                    'url' => $url, 'host' => $host
                 ]);
                 return null;
             }
-            
-            Logger::info("Successfully downloaded image", [
-                'url' => $url,
-                'size' => strlen($imageData),
-                'mime_type' => mime_content_type('data://application/octet-stream;base64,' . base64_encode($imageData))
+
+            // Determine directories
+            $baseDir = ($type === 'poster') ? self::POSTER_DIR : self::BACKDROP_DIR;
+            $baseDir = realpath($baseDir) ?: $baseDir;
+
+            // Ensure directory exists with secure perms
+            if (!is_dir($baseDir) && !mkdir($baseDir, 0755, true) && !is_dir($baseDir)) {
+                Logger::error('Failed to create image cache directory', ['dir' => $baseDir]);
+                return null;
+            }
+
+            // Create a temporary file for streaming download
+            $tmpPath = tempnam(sys_get_temp_dir(), 'imgcache_');
+            if ($tmpPath === false) {
+                Logger::error('Failed to create temp file for image download');
+                return null;
+            }
+
+            // Stream download via Guzzle with TLS verification and size cap
+            $client = new \GuzzleHttp\Client([
+                'verify' => true,
+                'timeout' => self::TIMEOUT,
+                'connect_timeout' => self::CONNECT_TIMEOUT,
+                'http_errors' => false,
+                'headers' => [
+                    'User-Agent' => 'MovieCollector/1.0'
+                ],
             ]);
-            
-            // Ensure directory exists with proper permissions
-            if (!is_dir($directory)) {
-                Logger::info("Creating directory", [
-                    'path' => $directory,
-                    'permissions' => '0755'
+
+            $bytesReceived = 0;
+            $mimeType = null;
+
+            try {
+                $response = $client->request('GET', $url, [
+                    'stream' => true,
+                    'on_headers' => function ($resp) use (&$mimeType) {
+                        $ct = $resp->getHeaderLine('Content-Type');
+                        $mimeType = $ct ? trim(explode(';', $ct, 2)[0]) : null;
+                    },
                 ]);
-                if (!mkdir($directory, 0755, true)) {
-                    $error = error_get_last();
-                    Logger::error("Failed to create directory", [
-                        'path' => $directory,
-                        'error_message' => $error['message'] ?? 'Unknown error',
-                        'error_type' => $error['type'] ?? 'Unknown type'
+            } catch (\Throwable $e) {
+                @unlink($tmpPath);
+                Logger::error('HTTP error during image download', ['url' => $url, 'error' => $e->getMessage()]);
+                return null;
+            }
+
+            $status = $response->getStatusCode();
+            if ($status >= 400) {
+                @unlink($tmpPath);
+                Logger::warning('Image download returned error status', ['url' => $url, 'status' => $status]);
+                return null;
+            }
+
+            // Open temp file handle
+            $fh = fopen($tmpPath, 'wb');
+            if ($fh === false) {
+                @unlink($tmpPath);
+                Logger::error('Failed to open temp file for writing image');
+                return null;
+            }
+
+            // Stream body and enforce size limit
+            $body = $response->getBody();
+            while (!$body->eof()) {
+                $chunk = $body->read(8192);
+                if ($chunk === '') {
+                    break;
+                }
+                $bytesReceived += strlen($chunk);
+                if ($bytesReceived > self::MAX_BYTES) {
+                    fclose($fh);
+                    @unlink($tmpPath);
+                    Logger::warning('Image exceeds maximum allowed size', [
+                        'url' => $url, 'bytes' => $bytesReceived
                     ]);
                     return null;
                 }
+                fwrite($fh, $chunk);
             }
-            
-            // Save the image
-            Logger::info("Attempting to save image", [
-                'path' => $localPath,
-                'size' => strlen($imageData)
-            ]);
-            
-            $bytesWritten = @file_put_contents($localPath, $imageData);
-            if ($bytesWritten === false) {
-                $error = error_get_last();
-                Logger::error("Failed to save image", [
-                    'path' => $localPath,
-                    'error_message' => $error['message'] ?? 'Unknown error',
-                    'error_type' => $error['type'] ?? 'Unknown type',
-                    'directory_exists' => is_dir($directory) ? 'yes' : 'no',
-                    'directory_writable' => is_writable($directory) ? 'yes' : 'no'
+            fclose($fh);
+
+            // Detect mime by magic bytes as primary, fallback to header
+            $detected = self::detectMime($tmpPath);
+            if ($detected) {
+                $mimeType = $detected;
+            }
+
+            if (!$mimeType || !isset(self::MIME_EXT[$mimeType])) {
+                @unlink($tmpPath);
+                Logger::warning('Unsupported or undetected image MIME type', [
+                    'url' => $url, 'mime' => $mimeType
                 ]);
                 return null;
             }
-            
-            Logger::info("Successfully saved image", [
-                'path' => $localPath,
-                'bytes_written' => $bytesWritten,
-                'file_exists' => file_exists($localPath) ? 'yes' : 'no',
-                'file_size' => file_exists($localPath) ? filesize($localPath) : 0
+
+            $ext = self::MIME_EXT[$mimeType];
+
+            // Build destination filename based on URL and MIME
+            $hash = md5($url);
+            $filename = $hash . '.' . $ext;
+            $destPath = $baseDir . DIRECTORY_SEPARATOR . $filename;
+
+            // If already exists, cleanup temp and return web path
+            if (is_readable($destPath)) {
+                @unlink($tmpPath);
+                return '/uploads/' . ($type === 'poster' ? 'posters/' : 'backdrops/') . $filename;
+            }
+
+            // Move temp file to destination atomically
+            if (!rename($tmpPath, $destPath)) {
+                @unlink($tmpPath);
+                Logger::error('Failed to move downloaded image to destination', [
+                    'dest' => $destPath
+                ]);
+                return null;
+            }
+
+            // Set safe permissions
+            @chmod($destPath, 0644);
+
+            Logger::info('Image cached successfully', [
+                'url' => $url,
+                'dest' => $destPath,
+                'bytes' => $bytesReceived,
+                'mime' => $mimeType
             ]);
-            
+
             return '/uploads/' . ($type === 'poster' ? 'posters/' : 'backdrops/') . $filename;
         } catch (\Exception $e) {
             Logger::error("Exception while caching image", [
@@ -143,6 +201,42 @@ class ImageCache
     /**
      * Remove a cached image
      */
+    private static function detectMime(string $path): ?string
+    {
+        // Try finfo if available
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo) {
+                $mime = finfo_file($finfo, $path) ?: null;
+                finfo_close($finfo);
+                if ($mime) {
+                    return $mime;
+                }
+            }
+        }
+        // Simple magic byte checks
+        $fh = @fopen($path, 'rb');
+        if ($fh) {
+            $sig = fread($fh, 12);
+            fclose($fh);
+            if ($sig !== false) {
+                // JPEG: FF D8 FF
+                if (strncmp($sig, "\xFF\xD8\xFF", 3) === 0) {
+                    return 'image/jpeg';
+                }
+                // PNG: 89 50 4E 47 0D 0A 1A 0A
+                if (strncmp($sig, "\x89PNG\x0D\x0A\x1A\x0A", 8) === 0) {
+                    return 'image/png';
+                }
+                // WebP: RIFF....WEBP
+                if (strncmp($sig, "RIFF", 4) === 0 && substr($sig, 8, 4) === 'WEBP') {
+                    return 'image/webp';
+                }
+            }
+        }
+        return null;
+    }
+    
     public static function removeImage(?string $localPath): bool
     {
         if (!$localPath) {

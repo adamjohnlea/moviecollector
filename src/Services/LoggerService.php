@@ -17,6 +17,7 @@ class LoggerService
     
     private static string $logFile;
     private static bool $initialized = false;
+    private static array $baseContext = [];
     
     /**
      * Initialize the logger
@@ -37,6 +38,15 @@ class LoggerService
         }
         
         self::$initialized = true;
+    }
+    
+    /**
+     * Set or extend base context for all log lines in this request/process
+     */
+    public static function setBaseContext(array $context): void
+    {
+        // Merge, with new keys overwriting previous ones
+        self::$baseContext = array_replace(self::$baseContext, $context);
     }
     
     /**
@@ -96,6 +106,17 @@ class LoggerService
             self::init();
         }
         
+        // Merge base context and provided context
+        $context = array_replace(self::$baseContext, $context);
+        
+        // Redact sensitive fields if present
+        $sensitiveKeys = ['tmdb_api_key','tmdb_access_token','api_key','access_token','authorization','Authorization','password'];
+        foreach ($sensitiveKeys as $key) {
+            if (isset($context[$key]) && is_string($context[$key])) {
+                $context[$key] = '***redacted***';
+            }
+        }
+        
         $timestamp = date('Y-m-d H:i:s');
         $contextJson = !empty($context) ? ' ' . json_encode($context) : '';
         $logMessage = "[{$timestamp}] [{$level}] {$message}{$contextJson}" . PHP_EOL;
@@ -103,4 +124,4 @@ class LoggerService
         // Append to log file
         file_put_contents(self::$logFile, $logMessage, FILE_APPEND);
     }
-} 
+}

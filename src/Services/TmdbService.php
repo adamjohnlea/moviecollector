@@ -47,14 +47,17 @@ class TmdbService
     public function searchMovies(string $query, int $page = 1): ?array
     {
         if (empty($query)) {
-            error_log("[TMDb] Empty search query");
+            Logger::warning('TMDb search called with empty query');
             return null;
         }
         
         try {
-            error_log("[TMDb] Searching for: " . $query);
-            error_log("[TMDb] Using API key: " . (empty($this->apiKey) ? 'no' : 'yes'));
-            error_log("[TMDb] Using access token: " . (empty($this->accessToken) ? 'no' : 'yes'));
+            Logger::info('TMDb search', [
+                'query' => $query,
+                'using_api_key' => empty($this->apiKey) ? 'no' : 'yes',
+                'using_access_token' => empty($this->accessToken) ? 'no' : 'yes',
+                'page' => $page
+            ]);
             
             $options = [
                 'query' => [
@@ -65,39 +68,45 @@ class TmdbService
                 ]
             ];
             
-            error_log("[TMDb] Making search request with options: " . json_encode($options));
+            Logger::debug('TMDb search request options', ['options' => $options]);
             $response = $this->request('GET', '/search/movie', $options);
-            error_log("[TMDb] Search response: " . json_encode($response));
+            Logger::debug('TMDb search response received', [ 'has_response' => $response !== null ? 'yes' : 'no' ]);
             
             if (!$response) {
-                error_log("[TMDb] No response received from API");
+                Logger::warning('TMDb search: no response from API');
                 return null;
             }
             
             if (isset($response['success']) && $response['success'] === false) {
-                error_log("[TMDb] API returned error: " . ($response['status_message'] ?? 'Unknown error'));
+                Logger::error('TMDb search: API returned error', [ 'status_message' => $response['status_message'] ?? 'Unknown error' ]);
                 return null;
             }
             
             if (!isset($response['results'])) {
-                error_log("[TMDb] Response missing results array");
-                error_log("[TMDb] Response: " . json_encode($response));
+                Logger::error('TMDb search: response missing results array', ['response' => $response]);
                 return null;
             }
             
-            error_log("[TMDb] Search successful. Found " . count($response['results']) . " results");
+            Logger::info('TMDb search successful', ['count' => count($response['results'])]);
             return $response;
             
         } catch (RequestException $e) {
-            error_log("[TMDb Error] Search failed: " . $e->getMessage());
-            error_log("[TMDb Error] Request URL: " . $e->getRequest()->getUri());
+            Logger::error('TMDb search failed', [
+                'error' => $e->getMessage(),
+                'url' => (string) $e->getRequest()->getUri()
+            ]);
             if ($e->hasResponse()) {
-                error_log("[TMDb Error] Response: " . $e->getResponse()->getBody());
+                Logger::error('TMDb search response error', [
+                    'status' => $e->getResponse()->getStatusCode(),
+                    'body' => (string) $e->getResponse()->getBody()
+                ]);
             }
             return null;
         } catch (\Exception $e) {
-            error_log("[TMDb Error] Unexpected error: " . $e->getMessage());
-            error_log("[TMDb Error] Stack trace: " . $e->getTraceAsString());
+            Logger::error('TMDb unexpected error during search', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return null;
         }
     }
@@ -176,7 +185,7 @@ class TmdbService
             }
             return $response;
         } catch (RequestException $e) {
-            error_log("[TMDb Error] Failed to get configuration: " . $e->getMessage());
+            Logger::error('TMDb getConfiguration failed', ['error' => $e->getMessage()]);
             return null;
         }
     }
@@ -246,17 +255,17 @@ class TmdbService
         
         // Use Bearer token if available, otherwise API key
         if (!empty($this->accessToken)) {
-            error_log("[TMDb Debug] Using access token for authentication");
+            Logger::debug('TMDb auth mode', ['mode' => 'access_token']);
             $options['headers']['Authorization'] = 'Bearer ' . $this->accessToken;
             $options['headers']['Content-Type'] = 'application/json;charset=utf-8';
         } elseif (!empty($this->apiKey)) {
-            error_log("[TMDb Debug] Using API key for authentication");
+            Logger::debug('TMDb auth mode', ['mode' => 'api_key']);
             if (!isset($options['query'])) {
                 $options['query'] = [];
             }
             $options['query']['api_key'] = $this->apiKey;
         } else {
-            error_log("[TMDb Error] No credentials available");
+            Logger::error('TMDb request called without credentials');
             throw new \RuntimeException('No TMDb API credentials available');
         }
         
@@ -268,34 +277,36 @@ class TmdbService
             if (!empty($options['query'])) {
                 $fullUrl .= '?' . http_build_query($options['query']);
             }
-            error_log("[TMDb Debug] Making request to: " . $fullUrl);
-            error_log("[TMDb Debug] Request headers: " . json_encode($options['headers']));
+            Logger::debug('TMDb request', ['url' => $fullUrl, 'endpoint' => $endpoint, 'headers' => $options['headers']]);
             
             $response = $this->client->request($method, $endpoint, $options);
             $body = (string) $response->getBody();
             $statusCode = $response->getStatusCode();
             
-            error_log("[TMDb Debug] Response status code: " . $statusCode);
+            Logger::debug('TMDb response', ['status' => $statusCode]);
             
             if ($statusCode >= 400) {
-                error_log("[TMDb Error] Request failed with status " . $statusCode);
-                error_log("[TMDb Error] Response body: " . $body);
+                Logger::error('TMDb request failed', ['status' => $statusCode, 'body' => $body]);
                 return null;
             }
             
             $data = json_decode($body, true);
             if (json_last_error() !== JSON_ERROR_NONE) {
-                error_log("[TMDb Error] JSON decode error: " . json_last_error_msg());
+                Logger::error('TMDb JSON decode error', ['error' => json_last_error_msg()]);
                 return null;
             }
             
             return $data;
         } catch (\Exception $e) {
-            error_log("[TMDb Error] Request failed: " . $e->getMessage());
+            Logger::error('TMDb request exception', [
+                'error' => $e->getMessage()
+            ]);
             if ($e instanceof RequestException && $e->hasResponse()) {
                 $response = $e->getResponse();
-                error_log("[TMDb Error] Response status: " . $response->getStatusCode());
-                error_log("[TMDb Error] Response body: " . $response->getBody());
+                Logger::error('TMDb request exception response', [
+                    'status' => $response->getStatusCode(),
+                    'body' => (string) $response->getBody()
+                ]);
             }
             return null;  // Return null instead of throwing
         }

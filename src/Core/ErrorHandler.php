@@ -63,7 +63,12 @@ class ErrorHandler
         // Display an error page in production
         if (getenv('APP_ENV') === 'production') {
             http_response_code(500);
-            require __DIR__ . '/../../templates/error.twig';
+            $errorPage = dirname(__DIR__, 2) . '/public/500.html';
+            if (is_readable($errorPage)) {
+                readfile($errorPage);
+            } else {
+                echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Server Error</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0d12;color:#e6e8eb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{max-width:560px;padding:32px;border-radius:12px;background:#131722;box-shadow:0 6px 24px rgba(0,0,0,.4)}h1{margin:0 0 8px;font-size:24px}p{margin:0;color:#b3bac5}</style></head><body><div class="card"><h1>Something went wrong</h1><p>An unexpected error occurred. Please try again later.</p></div></body></html>';
+            }
             exit;
         }
         
@@ -91,7 +96,12 @@ class ErrorHandler
             // Display an error page in production
             if (getenv('APP_ENV') === 'production') {
                 http_response_code(500);
-                require __DIR__ . '/../../templates/error.twig';
+                $errorPage = dirname(__DIR__, 2) . '/public/500.html';
+                if (is_readable($errorPage)) {
+                    readfile($errorPage);
+                } else {
+                    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Server Error</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0d12;color:#e6e8eb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{max-width:560px;padding:32px;border-radius:12px;background:#131722;box-shadow:0 6px 24px rgba(0,0,0,.4)}h1{margin:0 0 8px;font-size:24px}p{margin:0;color:#b3bac5}</style></head><body><div class="card"><h1>Something went wrong</h1><p>An unexpected error occurred. Please try again later.</p></div></body></html>';
+                }
             }
         }
     }

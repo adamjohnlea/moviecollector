@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Something went wrong</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: #131722;
+      --text: #e6e8eb;
+      --muted: #b3bac5;
+      --accent: #4ea8de;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(1200px 800px at 80% -10%, rgba(78,168,222,0.08), transparent),
+                  radial-gradient(1000px 700px at -10% 110%, rgba(148,226,213,0.06), transparent),
+                  var(--bg);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+    }
+    .card {
+      background: var(--panel);
+      border-radius: 14px;
+      padding: 28px 28px 24px;
+      width: min(92vw, 560px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.02);
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      letter-spacing: 0.2px;
+    }
+    p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .hint { margin-top: 16px; font-size: 14px; }
+    .sep { height: 1px; background: rgba(255,255,255,0.06); margin: 16px 0; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card" role="alert" aria-live="polite">
+    <h1>Something went wrong</h1>
+    <p>An unexpected error occurred while processing your request.</p>
+    <div class="sep"></div>
+    <p class="hint">Please try again later. If the problem persists, contact support.</p>
+  </div>
+</body>
+</html>

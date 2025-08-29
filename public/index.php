@@ -59,7 +59,13 @@ try {
     
     // Show error page
     if ($appEnv === 'production') {
-        include ROOT_DIR . '/templates/error.twig';
+        http_response_code(500);
+        $errorPage = ROOT_DIR . '/public/500.html';
+        if (is_readable($errorPage)) {
+            readfile($errorPage);
+        } else {
+            echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Server Error</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0d12;color:#e6e8eb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.card{max-width:560px;padding:32px;border-radius:12px;background:#131722;box-shadow:0 6px 24px rgba(0,0,0,.4)}h1{margin:0 0 8px;font-size:24px}p{margin:0;color:#b3bac5}</style></head><body><div class="card"><h1>Something went wrong</h1><p>An unexpected error occurred. Please try again later.</p></div></body></html>';
+        }
     } else {
         // In development, show the error
         throw $e;

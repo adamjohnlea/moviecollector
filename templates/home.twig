@@ -28,7 +28,35 @@
                     View Collection
                 </a>
             </div>
-            
+
+            {% if recently_watched is defined and recently_watched|length > 0 %}
+                <div class="mt-12">
+                    <h2 class="text-2xl font-bold mb-6">Recently Watched</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                        {% for item in recently_watched %}
+                            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-transform hover:scale-105">
+                                <a href="/movies/{{ item.tmdb_id }}">
+                                    {% if item.poster_url %}
+                                        <img src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full object-cover h-64">
+                                    {% else %}
+                                        <div class="w-full h-64 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                                            <span class="text-gray-500 dark:text-gray-400">No image</span>
+                                        </div>
+                                    {% endif %}
+                                    <div class="p-4">
+                                        <h3 class="font-bold text-gray-800 dark:text-white truncate">{{ item.title }}</h3>
+                                        <p class="text-xs text-gray-600 dark:text-gray-400" x-data="{ tz: '{{ user_timezone }}' }">
+                                            <span>Watched:</span>
+                                            <span x-init="(() => { const el = $el.querySelector('[data-ts]'); const ts = el.getAttribute('data-ts'); const iso = ts.replace(' ', 'T') + 'Z'; const d = new Date(iso); try { el.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(d); } catch(e) { el.textContent = d.toLocaleString(); } })()" data-ts="{{ item.watched_at }}"></span>
+                                        </p>
+                                    </div>
+                                </a>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
             {% if popular_movies|length > 0 %}
                 <div class="mt-16">
                     <h2 class="text-2xl font-bold mb-6">Popular Movies</h2>

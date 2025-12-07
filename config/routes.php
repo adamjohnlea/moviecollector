@@ -32,6 +32,13 @@ $router->post('/movies/{id}/remove', [MovieController::class, 'removeFromList'])
 $router->post('/movies/{id}/poster', [MovieController::class, 'uploadPoster']);
 // Per-movie refresh from TMDb
 $router->post('/movies/{id}/refresh', [MovieController::class, 'refreshSingleMovie']);
+// Watched log
+$router->post('/movies/{id}/watched', [MovieController::class, 'markWatched']);
+$router->get('/movies/{id}/watched-log', [MovieController::class, 'getWatchedLog']);
+// Delete a watched log entry (use POST for compatibility)
+$router->post('/watched/{id}/delete', [MovieController::class, 'deleteWatchedLog']);
+// Edit/update a watched log entry (use POST for compatibility)
+$router->post('/watched/{id}/edit', [MovieController::class, 'updateWatchedLog']);
 
 // List routes
 $router->get('/collection', [MovieController::class, 'collection']);

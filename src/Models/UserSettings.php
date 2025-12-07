@@ -11,8 +11,10 @@ class UserSettings
     private int $userId;
     private ?string $tmdbApiKey;
     private ?string $tmdbAccessToken;
+    private ?string $timezone = 'UTC';
     private string $createdAt;
     private string $updatedAt;
+    private bool $autoRemoveToWatch = false;
     
     // Display preferences
     private bool $showOverview = true;
@@ -97,6 +99,32 @@ class UserSettings
         
         return $stmt->execute([$preferencesJson, $userId]);
     }
+
+    /**
+     * Update timezone preference for a user
+     */
+    public static function updateTimezone(int $userId, string $timezone): bool
+    {
+        // Validate timezone identifier
+        try {
+            new \DateTimeZone($timezone);
+        } catch (\Throwable $e) {
+            $timezone = 'UTC';
+        }
+        $db = Database::getInstance();
+        $stmt = $db->prepare("UPDATE user_settings SET timezone = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?");
+        return $stmt->execute([$timezone, $userId]);
+    }
+
+    /**
+     * Update auto-remove flag for To Watch on mark watched
+     */
+    public static function updateAutoRemoveToWatchOnWatched(int $userId, bool $value): bool
+    {
+        $db = Database::getInstance();
+        $stmt = $db->prepare("UPDATE user_settings SET remove_from_to_watch_on_watched = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?");
+        return $stmt->execute([$value ? 1 : 0, $userId]);
+    }
     
     /**
      * Create a UserSettings object from database row
@@ -108,6 +136,8 @@ class UserSettings
         $settings->userId = (int) $data['user_id'];
         $settings->tmdbApiKey = $data['tmdb_api_key'];
         $settings->tmdbAccessToken = $data['tmdb_access_token'];
+        $settings->timezone = $data['timezone'] ?? 'UTC';
+        $settings->autoRemoveToWatch = (bool)($data['remove_from_to_watch_on_watched'] ?? 0);
         $settings->createdAt = $data['created_at'];
         $settings->updatedAt = $data['updated_at'];
         
@@ -191,6 +221,22 @@ class UserSettings
     public function getTmdbAccessToken(): ?string
     {
         return $this->tmdbAccessToken;
+    }
+
+    /**
+     * Get user's preferred timezone (IANA identifier), default 'UTC'
+     */
+    public function getTimezone(): string
+    {
+        return $this->timezone ?: 'UTC';
+    }
+
+    /**
+     * When enabled, marking a movie as watched auto-removes it from the To Watch list.
+     */
+    public function getAutoRemoveToWatchOnWatched(): bool
+    {
+        return $this->autoRemoveToWatch;
     }
     
     public function hasValidTmdbCredentials(): bool

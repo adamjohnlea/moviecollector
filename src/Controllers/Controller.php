@@ -6,6 +6,7 @@ namespace App\Controllers;
 use App\Core\Controller as BaseController;
 use App\Services\LoggerService;
 use App\Services\SessionService;
+use App\Models\UserSettings;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Twig\Environment;
@@ -27,6 +28,18 @@ abstract class Controller extends BaseController
         // Add CSRF token to all templates
         $twig->addGlobal('csrf_token', SessionService::getCsrfToken());
         $twig->addGlobal('current_user', SessionService::getCurrentUser());
+        // Add user timezone to all templates (defaults to UTC)
+        $tz = 'UTC';
+        $u = SessionService::getCurrentUser();
+        if ($u) {
+            try {
+                $us = UserSettings::getByUserId($u->getId());
+                if ($us) { $tz = $us->getTimezone() ?: 'UTC'; }
+            } catch (\Throwable $e) {
+                // ignore
+            }
+        }
+        $twig->addGlobal('user_timezone', $tz);
         
         // Register custom Twig extensions
         $twig->addExtension(new TwigExtension());

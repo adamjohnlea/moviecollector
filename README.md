@@ -15,6 +15,13 @@ A personal movie collection application built with PHP 8.4, Twig, Tailwind CSS, 
   - Visual indicators for movies already in your collection
 - Personal movie collection management
 - For Owned Media, replace TMDb poster with your own uploaded image
+- Watched / Viewing history
+  - Mark movies as watched, see per-movie viewing history
+  - Homepage "Recently Watched" widget (last 10 items)
+- Performance & caching
+  - TMDb configuration cached across requests (24h)
+  - Popular list cached (default 30 minutes)
+  - Search results cached (default 15 minutes)
 - Responsive design with Tailwind CSS
 - Custom logging system for error tracking and debugging
   - Detailed API request/response logging
@@ -104,13 +111,65 @@ Tip: The poster upload feature validates images without extra Composer packages.
    - Use the "Upload/Replace Poster" control to select an image (JPG/PNG/WEBP, max 5 MB)
    - Your uploaded poster will be used instead of the TMDb image
    - If you previously uploaded a custom poster for this movie, it will be replaced
-   - If you don’t see the change immediately, perform a hard refresh to bypass browser cache
+   - Note: Local images include a cache-busting version parameter, so changes should appear immediately without a hard refresh
+
+7. Watched / Viewing history:
+   - On a movie page, click "Mark as watched" for a quick entry, or "Add viewing with details" to include date/time, source, rating, minutes, etc.
+   - Expand "Viewing history" to see, edit, or delete entries. Counters (Watched xN, Last watched) update automatically.
+   - Homepage shows your last 10 viewings in the "Recently Watched" section.
+
+8. To Watch auto-remove (optional):
+   - Settings → enable "Remove a movie from To Watch when I mark it as watched".
+   - When enabled, marking watched will automatically remove the title from your To Watch list.
 
 ### Notes on poster uploads
 - Supported types: JPEG (.jpg), PNG (.png), WEBP (.webp)
 - Max size: 5 MB
 - Storage location: files are saved under `public/uploads/posters/` with safe, unique names
 - Security: uploads are only allowed for movies in your Owned Media and require a valid CSRF token
+
+### CLI: Image cache management
+Use the helper script to inspect and prune the on-disk image cache (TMDb posters/backdrops under `public/uploads`).
+
+```
+php bin/image_cache.php stats
+php bin/image_cache.php prune --orphans           # remove files not referenced by any movie
+php bin/image_cache.php prune --older-than=30     # remove files older than 30 days that are not referenced
+# Add --dry-run to preview deletions without removing files
+```
+
+The script never deletes user-uploaded posters referenced in the database.
+
+### Web server hardening and caching headers
+- Deny script execution in `public/uploads/` (no PHP execution).
+- Set long cache headers for hashed TMDb images; user-uploaded images carry a version query parameter to bust cache when updated.
+
+Nginx example:
+```
+location ^~ /uploads/ {
+    types { }
+    default_type application/octet-stream;
+    add_header X-Content-Type-Options nosniff;
+    try_files $uri =404;
+    # No script execution
+    location ~ \.(php|phar)$ { return 404; }
+    # Caching for TMDb-hashed files
+    location ~* \.(png|jpe?g|webp)$ { expires 30d; add_header Cache-Control "public, max-age=2592000"; }
+}
+```
+
+Apache example:
+```
+<Directory "${DOCUMENT_ROOT}/uploads">
+    Options -ExecCGI
+    <FilesMatch "\.(php|phar)$">
+        Require all denied
+    </FilesMatch>
+    <FilesMatch "\.(png|jpe?g|webp)$">
+        Header set Cache-Control "public, max-age=2592000"
+    </FilesMatch>
+</Directory>
+```
 
 ## Development
 

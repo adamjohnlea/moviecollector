@@ -19,8 +19,12 @@
     <div class="max-w-6xl mx-auto px-4 py-8">
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
             {% if movie.backdrop_url %}
+                {% set _bd = movie.backdrop_url %}
+                {% if _bd starts with '/uploads/' %}
+                    {% set _bd = _bd ~ (movie.last_updated_at ? ('?v=' ~ movie.last_updated_at|url_encode) : '') %}
+                {% endif %}
                 <div class="relative h-96">
-                    <img src="{{ movie.backdrop_url }}" alt="{{ movie.title }}" class="w-full h-full object-cover">
+                    <img src="{{ _bd }}" alt="{{ movie.title }}" class="w-full h-full object-cover">
                     <div class="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent"></div>
                     <div class="absolute bottom-0 left-0 p-8">
                         <h1 class="text-4xl font-bold text-white mb-2">{{ movie.title }}</h1>
@@ -42,12 +46,168 @@
                 <div class="flex flex-col md:flex-row gap-8">
                     <div class="w-full md:w-1/3">
                         {% if movie.poster_url %}
-                            <img src="{{ movie.poster_url }}" alt="{{ movie.title }}" class="w-full rounded-lg shadow-md">
+                            {% set _ps = movie.poster_url %}
+                            {% if _ps starts with '/uploads/' %}
+                                {% set _ps = _ps ~ (movie.last_updated_at ? ('?v=' ~ movie.last_updated_at|url_encode) : '') %}
+                            {% endif %}
+                            <img src="{{ _ps }}" alt="{{ movie.title }}" class="w-full rounded-lg shadow-md">
                         {% else %}
                             <div class="w-full aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg flex items-center justify-center">
                                 <span class="text-gray-400 dark:text-gray-500">No poster available</span>
                             </div>
                         {% endif %}
+
+                        {# Watched summary + quick action and add-with-details #}
+                        <div class="mt-4 border border-gray-200 dark:border-gray-700 rounded-lg p-4" 
+                             x-data="{
+                               count: {{ movie.watched_count|default(0) }},
+                               lastAt: {{ movie.last_watched_at ? ('\'' ~ movie.last_watched_at ~ '\'') : 'null' }},
+                               userTz: '{{ user_timezone }}',
+                               busy: false,
+                               addOpen: false,
+                               form: { watched_at: '', source: '', format_id: '', rating: '', notes: '', location: '', runtime_minutes: '' },
+                               fmt(ts){
+                                 if (!ts) return '';
+                                 // Treat server value as UTC 'Y-m-d H:i:s'
+                                 const iso = ts.replace(' ', 'T') + 'Z';
+                                 const d = new Date(iso);
+                                 try {
+                                   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: this.userTz }).format(d);
+                                 } catch (e) {
+                                   return d.toLocaleString();
+                                 }
+                               },
+                               init(){
+                                 window.addEventListener('watched-rollup', (e) => {
+                                   if (e && e.detail) {
+                                     if (typeof e.detail.count !== 'undefined') this.count = e.detail.count;
+                                     if (typeof e.detail.lastAt !== 'undefined') this.lastAt = e.detail.lastAt;
+                                   }
+                                 });
+                               },
+                               async markWatched() {
+                                 if (this.busy) return;
+                                 this.busy = true;
+                                 try {
+                                   const res = await fetch('/movies/{{ movie.id }}/watched', {
+                                     method: 'POST',
+                                     headers: {
+                                       'Content-Type': 'application/json',
+                                       'X-CSRF-Token': '{{ csrf_token }}'
+                                     },
+                                     body: JSON.stringify({})
+                                   });
+                                   const data = await res.json();
+                                   if (data && data.success) {
+                                     this.count = data.watched_count ?? this.count + 1;
+                                     this.lastAt = data.last_watched_at ?? this.lastAt;
+                                   } else {
+                                     alert(data?.error || 'Failed to mark as watched');
+                                   }
+                                 } catch (e) {
+                                   console.error(e);
+                                   alert('Network error while marking as watched');
+                                 } finally {
+                                   this.busy = false;
+                                 }
+                               },
+                               async addWithDetails() {
+                                 if (this.busy) return;
+                                 this.busy = true;
+                                 try {
+                                   const payload = { ...this.form };
+                                   // normalize empty strings to null
+                                   Object.keys(payload).forEach(k => { if (payload[k] === '') payload[k] = null; });
+                                   const res = await fetch('/movies/{{ movie.id }}/watched', {
+                                     method: 'POST',
+                                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+                                     body: JSON.stringify(payload)
+                                   });
+                                   const data = await res.json();
+                                   if (data && data.success) {
+                                     this.count = data.watched_count ?? this.count + 1;
+                                     this.lastAt = data.last_watched_at ?? this.lastAt;
+                                     this.addOpen = false;
+                                     this.form = { watched_at: '', source: '', format_id: '', rating: '', notes: '', location: '', runtime_minutes: '' };
+                                     // If history panel is present, signal it to prepend via event (history listens and may reload first page)
+                                     window.dispatchEvent(new CustomEvent('watched-created', { detail: { tmdb_id: {{ movie.id }} } }));
+                                   } else {
+                                     alert(data?.error || 'Failed to add viewing');
+                                   }
+                                 } catch (e) {
+                                   console.error(e);
+                                   alert('Network error while adding viewing');
+                                 } finally {
+                                   this.busy = false;
+                                 }
+                               }
+                             }">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-sm text-gray-700 dark:text-gray-300">
+                                        <span class="font-semibold">Watched</span>
+                                        <span class="ml-1 px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200" x-text="count"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        <template x-if="lastAt">
+                                            <span>Last watched: <span x-text="fmt(lastAt)"></span></span>
+                                        </template>
+                                        <template x-if="!lastAt">
+                                            <span>Not watched yet</span>
+                                        </template>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button @click="markWatched()"
+                                            :disabled="busy"
+                                            class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-md text-sm font-medium">
+                                        Mark as watched
+                                    </button>
+                                    <button @click="addOpen = true"
+                                            :disabled="busy"
+                                            class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 disabled:opacity-60 text-white rounded-md text-sm font-medium">
+                                        Add viewing with details
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Add Viewing Modal -->
+                            <div x-show="addOpen" x-cloak class="fixed inset-0 z-40 flex items-center justify-center">
+                                <div class="absolute inset-0 bg-black bg-opacity-50" @click="addOpen = false"></div>
+                                <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-lg w-full max-w-lg p-6 z-50">
+                                    <h3 class="text-lg font-semibold mb-4">Add viewing with details</h3>
+                                    <div class="grid grid-cols-1 gap-3">
+                                        <label class="text-sm">Date/Time
+                                            <input type="datetime-local" x-model="form.watched_at" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                        </label>
+                                        <label class="text-sm">Source
+                                            <input type="text" x-model="form.source" placeholder="streaming / theater / owned_disc" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                        </label>
+                                        <label class="text-sm">Format ID (optional)
+                                            <input type="number" x-model="form.format_id" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                        </label>
+                                        <div class="grid grid-cols-2 gap-3">
+                                            <label class="text-sm">Rating (1–5)
+                                                <input type="number" min="1" max="5" x-model="form.rating" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                            </label>
+                                            <label class="text-sm">Minutes
+                                                <input type="number" min="0" x-model="form.runtime_minutes" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                            </label>
+                                        </div>
+                                        <label class="text-sm">Location
+                                            <input type="text" x-model="form.location" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                        </label>
+                                        <label class="text-sm">Notes
+                                            <textarea x-model="form.notes" rows="3" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white"></textarea>
+                                        </label>
+                                    </div>
+                                    <div class="mt-4 flex justify-end gap-2">
+                                        <button class="px-3 py-1.5 rounded bg-gray-200 dark:bg-gray-700" @click="addOpen = false">Cancel</button>
+                                        <button class="px-3 py-1.5 rounded bg-indigo-600 text-white" :disabled="busy" @click="addWithDetails()">Save</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         
                         {% if is_owned %}
                         <div class="mt-4 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -241,6 +401,21 @@
                             },
                             isOpen(section) {
                                 return this.activeSection === section;
+                            },
+                            init() {
+                                try {
+                                  const key = 'mc_active_section:' + {{ movie.id }};
+                                  let saved = localStorage.getItem(key);
+                                  // If saved section is viewing_history but there are no entries, ignore it
+                                  const initialCount = {{ movie.watched_count|default(0) }};
+                                  if (saved === 'viewing_history' && initialCount === 0) {
+                                    saved = null;
+                                  }
+                                  if (saved) this.activeSection = saved;
+                                  this.$watch('activeSection', (v) => {
+                                    try { localStorage.setItem(key, v ?? ''); } catch (e) {}
+                                  });
+                                } catch (e) {}
                             }
                         }">
                             <!-- Overview Section -->
@@ -314,7 +489,201 @@
                                 </div>
                             </div>
                             {% endif %}
-                            
+
+                            {# Viewing history section #}
+                            <div class="mb-6" x-data="{
+                              items: [],
+                              loaded: false,
+                              loading: false,
+                              error: null,
+                              page: 1,
+                              limit: 20,
+                              // derive initial hasMore from server roll-up count to avoid showing Load more on empty
+                              initialCount: {{ movie.watched_count|default(0) }},
+                              hasMore: {{ movie.watched_count|default(0) }} > 20,
+                              editOpen: false,
+                              editItem: null,
+                              editForm: { watched_at: '', source: '', format_id: '', rating: '', notes: '', location: '', runtime_minutes: '' },
+                              async loadLogs() {
+                                if (this.loading) return;
+                                this.loading = true; this.error = null;
+                                try {
+                                  const url = `/movies/{{ movie.id }}/watched-log?page=${this.page}&limit=${this.limit}`;
+                                  const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
+                                  if (!res.ok) throw new Error('Failed to load history');
+                                  const data = await res.json();
+                                  if (data && data.success) {
+                                    const arr = data.items || [];
+                                    if (this.page === 1) {
+                                      this.items = arr;
+                                    } else {
+                                      this.items = this.items.concat(arr);
+                                    }
+                                    this.loaded = true;
+                                    if (arr.length < this.limit) { this.hasMore = false; } else { this.page += 1; this.hasMore = true; }
+                                  } else { this.error = data?.error || 'Failed to load history'; }
+                                } catch (e) { this.error = e.message || 'Network error'; }
+                                finally { this.loading = false; }
+                              },
+                              async deleteLog(id) {
+                                if (!confirm('Delete this entry?')) return;
+                                try {
+                                  const res = await fetch('/watched/' + id + '/delete', { method: 'POST', headers: { 'X-CSRF-Token': '{{ csrf_token }}', 'Accept': 'application/json' } });
+                                  const data = await res.json();
+                                  if (data && data.success) {
+                                    this.items = this.items.filter(i => i.id !== id);
+                                    // Notify summary badge
+                                    window.dispatchEvent(new CustomEvent('watched-rollup', { detail: { count: data.watched_count, lastAt: data.last_watched_at } }));
+                                    // Re-evaluate hasMore when list shrinks
+                                    if (this.items.length === 0) this.hasMore = false;
+                                  } else {
+                                    alert(data?.error || 'Failed to delete');
+                                  }
+                                } catch (e) { alert('Network error'); }
+                              },
+                              openEdit(item) {
+                                this.editItem = JSON.parse(JSON.stringify(item));
+                                // Pre-fill form (convert watched_at 'Y-m-d H:i:s' UTC to local datetime-local string without timezone)
+                                const toLocalInput = (ts) => {
+                                  if (!ts) return '';
+                                  const iso = ts.replace(' ', 'T') + 'Z';
+                                  const d = new Date(iso);
+                                  const pad = n => String(n).padStart(2, '0');
+                                  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                                };
+                                this.editForm = {
+                                  watched_at: toLocalInput(item.watched_at),
+                                  source: item.source || '',
+                                  format_id: item.format_id || '',
+                                  rating: item.rating || '',
+                                  notes: item.notes || '',
+                                  location: item.location || '',
+                                  runtime_minutes: item.runtime_minutes || ''
+                                };
+                                this.editOpen = true;
+                              },
+                              async saveEdit() {
+                                if (!this.editItem) return;
+                                try {
+                                  const payload = { ...this.editForm };
+                                  Object.keys(payload).forEach(k => { if (payload[k] === '') payload[k] = null; });
+                                  const res = await fetch('/watched/' + this.editItem.id + '/edit', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}', 'Accept': 'application/json' },
+                                    body: JSON.stringify(payload)
+                                  });
+                                  const data = await res.json();
+                                  if (data && data.success) {
+                                    // Update row locally (only fields we edit)
+                                    const idx = this.items.findIndex(i => i.id === this.editItem.id);
+                                    if (idx >= 0) {
+                                      this.items[idx] = { ...this.items[idx], ...payload };
+                                      // watched_at needs to be back to server format; if provided, keep original input but server roll-up event contains last_watched_at
+                                      if (payload.watched_at) {
+                                        // payload datetime-local is local; keep as-is on UI; when list reloads it will normalize from server
+                                        // Do nothing special; leave current string for display conversion via template
+                                      }
+                                    }
+                                    window.dispatchEvent(new CustomEvent('watched-rollup', { detail: { count: data.watched_count, lastAt: data.last_watched_at } }));
+                                    this.editOpen = false; this.editItem = null;
+                                  } else {
+                                    alert(data?.error || 'Failed to save changes');
+                                  }
+                                } catch (e) {
+                                  console.error(e);
+                                  alert('Network error');
+                                }
+                              }
+                            }">
+                                <div @click="toggle('viewing_history'); if (!isOpen('viewing_history')) {}" 
+                                     @click.once="loadLogs()"
+                                     class="flex justify-between items-center p-4 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer">
+                                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Viewing history</h2>
+                                    <svg :class="{'rotate-180': isOpen('viewing_history')}" class="w-5 h-5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                <div x-show="isOpen('viewing_history')"
+                                     x-transition:enter="transition ease-out duration-200"
+                                     x-transition:enter-start="opacity-0 -translate-y-2"
+                                     x-transition:enter-end="opacity-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-150"
+                                     x-transition:leave-start="opacity-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 -translate-y-2"
+                                     class="mt-2 p-4 bg-white dark:bg-gray-800 rounded-b-lg">
+                                    <template x-if="loading">
+                                        <p class="text-sm text-gray-500 dark:text-gray-400">Loading...</p>
+                                    </template>
+                                    <template x-if="error">
+                                        <p class="text-sm text-red-600" x-text="error"></p>
+                                    </template>
+                                    <template x-if="loaded && items.length === 0 && !loading && !error">
+                                        <p class="text-sm text-gray-500 dark:text-gray-400">No viewings logged yet.</p>
+                                    </template>
+                                    <div class="space-y-3" x-show="items.length > 0">
+                                        <template x-for="item in items" :key="item.id">
+                                            <div class="flex items-start justify-between p-3 border border-gray-200 dark:border-gray-700 rounded">
+                                                <div>
+                                                    <div class="text-sm text-gray-800 dark:text-gray-200" x-text="(function(){ try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: '{{ user_timezone }}' }).format(new Date(item.watched_at.replace(' ', 'T') + 'Z')); } catch(e) { return new Date(item.watched_at.replace(' ', 'T') + 'Z').toLocaleString(); } })()"></div>
+                                                    <div class="text-xs text-gray-500 dark:text-gray-400" x-show="item.source || item.location || item.rating || item.runtime_minutes">
+                                                        <template x-if="item.source"><span>Source: <span x-text="item.source"></span></template>
+                                                        <template x-if="item.location"><span class="ml-2">Location: <span x-text="item.location"></span></template>
+                                                        <template x-if="item.rating"><span class="ml-2">Rating: <span x-text="item.rating"></span></template>
+                                                        <template x-if="item.runtime_minutes"><span class="ml-2">Minutes: <span x-text="item.runtime_minutes"></span></template>
+                                                    </div>
+                                                    <div class="text-xs text-gray-500 dark:text-gray-400" x-show="item.notes" x-text="item.notes"></div>
+                                                </div>
+                                                <div class="flex items-center gap-3">
+                                                    <button @click="openEdit(item)" class="text-indigo-600 hover:text-indigo-700 text-sm">Edit</button>
+                                                    <button @click="deleteLog(item.id)" class="text-red-600 hover:text-red-700 text-sm">Delete</button>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    <div class="mt-4 flex items-center justify-center" x-show="items.length > 0 && hasMore && !loading && !error">
+                                        <button @click="loadLogs()" class="px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 rounded">
+                                            Load more
+                                        </button>
+                                    </div>
+                                    <!-- Edit Modal -->
+                                    <div x-show="editOpen" x-cloak class="fixed inset-0 z-40 flex items-center justify-center">
+                                        <div class="absolute inset-0 bg-black bg-opacity-50" @click="editOpen = false"></div>
+                                        <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-lg w-full max-w-lg p-6 z-50">
+                                            <h3 class="text-lg font-semibold mb-4">Edit viewing</h3>
+                                            <div class="grid grid-cols-1 gap-3">
+                                                <label class="text-sm">Date/Time
+                                                    <input type="datetime-local" x-model="editForm.watched_at" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                </label>
+                                                <label class="text-sm">Source
+                                                    <input type="text" x-model="editForm.source" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                </label>
+                                                <label class="text-sm">Format ID (optional)
+                                                    <input type="number" x-model="editForm.format_id" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                </label>
+                                                <div class="grid grid-cols-2 gap-3">
+                                                    <label class="text-sm">Rating (1–5)
+                                                        <input type="number" min="1" max="5" x-model="editForm.rating" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                    </label>
+                                                    <label class="text-sm">Minutes
+                                                        <input type="number" min="0" x-model="editForm.runtime_minutes" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                    </label>
+                                                </div>
+                                                <label class="text-sm">Location
+                                                    <input type="text" x-model="editForm.location" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                </label>
+                                                <label class="text-sm">Notes
+                                                    <textarea x-model="editForm.notes" rows="3" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white"></textarea>
+                                                </label>
+                                            </div>
+                                            <div class="mt-4 flex justify-end gap-2">
+                                                <button class="px-3 py-1.5 rounded bg-gray-200 dark:bg-gray-700" @click="editOpen = false">Cancel</button>
+                                                <button class="px-3 py-1.5 rounded bg-indigo-600 text-white" @click="saveEdit()">Save</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Cast & Crew Section -->
                             {% if sections.cast_crew.loaded and (sections.cast_crew.visible is not defined or sections.cast_crew.visible) %}
                             <div class="mb-6">

@@ -34,7 +34,12 @@
                        x-data="{ showOverlay: false }">
                         <div class="relative" @mouseenter="showOverlay = true" @mouseleave="showOverlay = false">
                             {% if movie.getPosterPath() %}
-                                {% set posterUrl = movie.getLocalPosterPath() ? ('https://moviecollector.test' ~ movie.getLocalPosterPath()) : ('https://image.tmdb.org/t/p/w500' ~ movie.getPosterPath()) %}
+                                {% if movie.getLocalPosterPath() %}
+                                    {% set _lp = movie.getLocalPosterPath() ~ ('?v=' ~ movie.getLastUpdatedAt()|url_encode) %}
+                                    {% set posterUrl = 'https://moviecollector.test' ~ _lp %}
+                                {% else %}
+                                    {% set posterUrl = 'https://image.tmdb.org/t/p/w500' ~ movie.getPosterPath() %}
+                                {% endif %}
                                 <img src="{{ posterUrl }}" alt="{{ movie.getTitle() }}" class="w-full object-cover h-64">
                             {% else %}
                                 <div class="w-full h-64 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
@@ -60,8 +65,15 @@
                                     {{ movie.getReleaseDate()|slice(0, 4) }}
                                 </p>
                             {% endif %}
+                            {# Watched badge #}
+                            <div class="mt-1 flex items-center gap-2">
+                                {% set wc = movie.getWatchedCount() %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                                    Watched {{ wc }}
+                                </span>
+                            </div>
                             <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                                Added {{ movie.getAddedAt()|date("M j, Y") }}
+                                Added {{ movie.getAddedAt()|date("M j, Y", user_timezone) }}
                             </p>
                             
                             {# Add format badges in their own row at the bottom of the info box #}

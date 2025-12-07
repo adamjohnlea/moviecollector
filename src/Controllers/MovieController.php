@@ -14,6 +14,7 @@ use App\Services\ImageCache;
 use App\Database\Database;
 use App\Services\LoggerService as Logger;
 use App\Services\LoggerService;
+use App\Models\WatchedLog;
 
 class MovieController extends Controller
 {
@@ -78,8 +79,8 @@ class MovieController extends Controller
             $tmdbService = new TmdbService($userSettings);
             Logger::info("[Movie Search] Created TMDb service");
             
-            Logger::info("[Movie Search] About to call searchMovies with query: " . $query);
-            $searchResults = $tmdbService->searchMovies($query);
+            Logger::info("[Movie Search] About to call searchMoviesCached with query: " . $query);
+            $searchResults = $tmdbService->searchMoviesCached($query, 1);
             Logger::info("[Movie Search] Raw search results: " . json_encode($searchResults));
             Logger::info("[Movie Search] Search completed. Has results: " . ($searchResults && isset($searchResults['results']) ? 'yes' : 'no'));
             
@@ -285,7 +286,11 @@ class MovieController extends Controller
                         'videos' => $cachedMovie->getVideos(),
                         'images' => $cachedMovie->getImages(),
                         'reviews' => $cachedMovie->getReviews(),
-                        'external_ids' => $cachedMovie->getExternalIds()
+                        'external_ids' => $cachedMovie->getExternalIds(),
+                        'last_updated_at' => $cachedMovie->getLastUpdatedAt(),
+                        // Watched roll-ups
+                        'watched_count' => method_exists($cachedMovie, 'getWatchedCount') ? $cachedMovie->getWatchedCount() : 0,
+                        'last_watched_at' => method_exists($cachedMovie, 'getLastWatchedAt') ? $cachedMovie->getLastWatchedAt() : null,
                     ];
 
                     Logger::info("Checking cached image paths", [
@@ -459,6 +464,14 @@ class MovieController extends Controller
                     'external_ids' => $movieData['external_ids'] ?? null
                 ]);
             }
+
+            // Include watched roll-ups and last_updated_at if the movie exists in user's lists
+            $stmt = Database::getInstance()->prepare("SELECT watched_count, last_watched_at, last_updated_at FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
+            $stmt->execute([$user->getId(), $tmdbId]);
+            $roll = $stmt->fetch();
+            $movieData['watched_count'] = $roll ? (int)($roll['watched_count'] ?? 0) : 0;
+            $movieData['last_watched_at'] = $roll['last_watched_at'] ?? null;
+            $movieData['last_updated_at'] = $roll['last_updated_at'] ?? ($movieData['last_updated_at'] ?? null);
         }
         
         // Define sections for the accordion UI
@@ -1264,6 +1277,299 @@ class MovieController extends Controller
             }
             return $this->redirect('/movies/' . $tmdbId);
         }
+    }
+
+    /**
+     * Mark a movie as watched now (or at a supplied time) and update roll-ups.
+     * Accepts optional fields via form or JSON: watched_at, source, format_id, rating, notes, location, runtime_minutes
+     */
+    public function markWatched(Request $request, array $params): Response
+    {
+        // Require login
+        $redirect = $this->requireLogin();
+        if ($redirect) {
+            return $redirect;
+        }
+
+        $user = SessionService::getCurrentUser();
+        $tmdbId = (int)($params['id'] ?? 0);
+        // Determine if the client expects JSON
+        $wantsJson = $request->isXmlHttpRequest()
+            || stripos($request->headers->get('Content-Type') ?? '', 'application/json') !== false
+            || stripos($request->headers->get('Accept') ?? '', 'application/json') !== false;
+
+        if ($tmdbId <= 0) {
+            return $this->json(['success' => false, 'error' => 'Invalid movie ID'], 400);
+        }
+
+        // CSRF token (form or header)
+        $token = $request->request->get('csrf_token') ?: $request->headers->get('X-CSRF-Token');
+        if (!$this->verifyCsrfToken($token)) {
+            if ($wantsJson) {
+                return $this->json(['success' => false, 'error' => 'Invalid CSRF token'], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Ensure the movie exists in any of the user's lists
+        $db = Database::getInstance();
+        $stmt = $db->prepare("SELECT id FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
+        $stmt->execute([$user->getId(), $tmdbId]);
+        $movieRow = $stmt->fetch();
+        if (!$movieRow) {
+            $msg = 'Movie is not in your lists yet. Add it first.';
+            if ($wantsJson) {
+                return $this->json(['success' => false, 'error' => $msg], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Parse input (allow JSON or form)
+        $meta = [];
+        $watchedAt = null;
+        if ($request->isXmlHttpRequest() || (stripos($request->headers->get('Content-Type') ?? '', 'application/json') !== false)) {
+            $payload = json_decode((string)$request->getContent(), true) ?: [];
+            $meta['source'] = $payload['source'] ?? null;
+            $meta['format_id'] = isset($payload['format_id']) ? (int)$payload['format_id'] : null;
+            $meta['location'] = $payload['location'] ?? null;
+            $meta['runtime_minutes'] = isset($payload['runtime_minutes']) ? (int)$payload['runtime_minutes'] : null;
+            $meta['rating'] = isset($payload['rating']) ? (int)$payload['rating'] : null;
+            $meta['notes'] = $payload['notes'] ?? null;
+            if (!empty($payload['watched_at'])) {
+                try { $watchedAt = new \DateTimeImmutable($payload['watched_at']); } catch (\Throwable $e) { $watchedAt = null; }
+            }
+        } else {
+            $meta['source'] = $request->request->get('source');
+            $meta['format_id'] = $request->request->getInt('format_id') ?: null;
+            $meta['location'] = $request->request->get('location');
+            $meta['runtime_minutes'] = $request->request->getInt('runtime_minutes') ?: null;
+            $meta['rating'] = $request->request->getInt('rating') ?: null;
+            $meta['notes'] = $request->request->get('notes');
+            $wa = $request->request->get('watched_at');
+            if (!empty($wa)) {
+                try { $watchedAt = new \DateTimeImmutable((string)$wa); } catch (\Throwable $e) { $watchedAt = null; }
+            }
+        }
+
+        $ok = WatchedLog::create($user->getId(), $tmdbId, $watchedAt, $meta);
+
+        LoggerService::info('Marked movie as watched', [
+            'user_id' => $user->getId(),
+            'tmdb_id' => $tmdbId,
+            'success' => $ok ? 'yes' : 'no'
+        ]);
+
+        // Optional auto-remove from To Watch if user enabled the setting
+        $autoRemoved = false;
+        try {
+            $userSettings = UserSettings::getByUserId($user->getId());
+            if ($userSettings && $userSettings->getAutoRemoveToWatchOnWatched()) {
+                $currentList = \App\Models\Movie::getListType($user->getId(), $tmdbId);
+                if ($currentList === \App\Models\Movie::LIST_TO_WATCH) {
+                    $autoRemoved = \App\Models\Movie::removeFromList($user->getId(), $tmdbId);
+                    LoggerService::info('Auto-removed movie from To Watch after marking watched', [
+                        'user_id' => $user->getId(),
+                        'tmdb_id' => $tmdbId,
+                        'removed' => $autoRemoved ? 'yes' : 'no'
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            LoggerService::warning('Failed to process auto-remove from To Watch', [
+                'tmdb_id' => $tmdbId,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        if ($wantsJson) {
+            // Return updated roll-ups
+            $stmt = $db->prepare("SELECT watched_count, last_watched_at FROM movies WHERE user_id = ? AND tmdb_id = ?");
+            $stmt->execute([$user->getId(), $tmdbId]);
+            $roll = $stmt->fetch() ?: ['watched_count' => 0, 'last_watched_at' => null];
+            return $this->json([
+                'success' => (bool)$ok,
+                'watched_count' => (int)($roll['watched_count'] ?? 0),
+                'last_watched_at' => $roll['last_watched_at'] ?? null,
+                'auto_removed_from_to_watch' => $autoRemoved,
+            ], $ok ? 200 : 500);
+        }
+
+        return $this->redirect('/movies/' . $tmdbId);
+    }
+
+    /**
+     * Return paginated watched log entries for a movie (JSON only).
+     */
+    public function getWatchedLog(Request $request, array $params): Response
+    {
+        $redirect = $this->requireLogin();
+        if ($redirect) {
+            return $redirect;
+        }
+        $user = SessionService::getCurrentUser();
+        $tmdbId = (int)($params['id'] ?? 0);
+        if ($tmdbId <= 0) {
+            return $this->json(['success' => false, 'error' => 'Invalid movie ID'], 400);
+        }
+
+        $page = max(1, (int)($request->query->get('page') ?: 1));
+        $limit = min(50, max(1, (int)($request->query->get('limit') ?: 20)));
+        $offset = ($page - 1) * $limit;
+
+        $items = WatchedLog::getByMovie($user->getId(), $tmdbId, $limit, $offset);
+
+        return $this->json([
+            'success' => true,
+            'page' => $page,
+            'limit' => $limit,
+            'count' => count($items),
+            'items' => $items,
+        ]);
+    }
+
+    /**
+     * Delete a watched log entry (JSON only). Recomputes roll-ups on success.
+     */
+    public function deleteWatchedLog(Request $request, array $params): Response
+    {
+        $redirect = $this->requireLogin();
+        if ($redirect) {
+            return $redirect;
+        }
+        $user = SessionService::getCurrentUser();
+
+        // CSRF required via header for fetch requests
+        $token = $request->headers->get('X-CSRF-Token') ?: $request->request->get('csrf_token');
+        if (!$this->verifyCsrfToken($token)) {
+            return $this->json(['success' => false, 'error' => 'Invalid CSRF token'], 400);
+        }
+
+        $logId = (int)($params['id'] ?? 0);
+        if ($logId <= 0) {
+            return $this->json(['success' => false, 'error' => 'Invalid log ID'], 400);
+        }
+
+        // Read the log to know which movie to recompute and to authorize
+        $db = Database::getInstance();
+        $stmt = $db->prepare("SELECT tmdb_id FROM watched_logs WHERE id = ? AND user_id = ? LIMIT 1");
+        $stmt->execute([$logId, $user->getId()]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return $this->json(['success' => false, 'error' => 'Log not found'], 404);
+        }
+        $tmdbId = (int)$row['tmdb_id'];
+
+        $ok = WatchedLog::delete($user->getId(), $logId);
+        if (!$ok) {
+            return $this->json(['success' => false, 'error' => 'Failed to delete log'], 500);
+        }
+
+        // Return updated roll-ups
+        $r = $db->prepare("SELECT watched_count, last_watched_at FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
+        $r->execute([$user->getId(), $tmdbId]);
+        $roll = $r->fetch() ?: ['watched_count' => 0, 'last_watched_at' => null];
+
+        return $this->json([
+            'success' => true,
+            'tmdb_id' => $tmdbId,
+            'watched_count' => (int)($roll['watched_count'] ?? 0),
+            'last_watched_at' => $roll['last_watched_at'] ?? null,
+        ]);
+    }
+
+    /**
+     * Edit/Update a watched log entry (JSON only). Returns updated roll-ups on success.
+     * Accepts fields: watched_at, source, format_id, rating (1–5), notes, location, runtime_minutes (>=0)
+     */
+    public function updateWatchedLog(Request $request, array $params): Response
+    {
+        // Require login
+        $redirect = $this->requireLogin();
+        if ($redirect) {
+            return $redirect;
+        }
+
+        // Enforce JSON and CSRF
+        $token = $request->headers->get('X-CSRF-Token') ?: $request->request->get('csrf_token');
+        if (!$this->verifyCsrfToken($token)) {
+            return $this->json(['success' => false, 'error' => 'Invalid CSRF token'], 400);
+        }
+
+        $user = SessionService::getCurrentUser();
+        $logId = (int)($params['id'] ?? 0);
+        if ($logId <= 0) {
+            return $this->json(['success' => false, 'error' => 'Invalid log ID'], 400);
+        }
+
+        // Parse payload (support JSON or form-encoded)
+        $fields = [];
+        $contentType = $request->headers->get('Content-Type') ?? '';
+        if (stripos($contentType, 'application/json') !== false) {
+            $payload = json_decode((string)$request->getContent(), true) ?: [];
+            $fields = is_array($payload) ? $payload : [];
+        } else {
+            $fields['watched_at'] = $request->request->get('watched_at');
+            $fields['source'] = $request->request->get('source');
+            $fields['format_id'] = $request->request->get('format_id');
+            $fields['rating'] = $request->request->get('rating');
+            $fields['notes'] = $request->request->get('notes');
+            $fields['location'] = $request->request->get('location');
+            $fields['runtime_minutes'] = $request->request->get('runtime_minutes');
+        }
+
+        // Coerce and validate specific fields
+        if (isset($fields['rating']) && $fields['rating'] !== null && $fields['rating'] !== '') {
+            $r = (int)$fields['rating'];
+            if ($r < 1 || $r > 5) {
+                return $this->json(['success' => false, 'error' => 'Rating must be between 1 and 5'], 400);
+            }
+            $fields['rating'] = $r;
+        } else {
+            // allow clearing
+            $fields['rating'] = null;
+        }
+
+        if (isset($fields['runtime_minutes']) && $fields['runtime_minutes'] !== null && $fields['runtime_minutes'] !== '') {
+            $m = (int)$fields['runtime_minutes'];
+            if ($m < 0) {
+                return $this->json(['success' => false, 'error' => 'Runtime minutes cannot be negative'], 400);
+            }
+            $fields['runtime_minutes'] = $m;
+        } else {
+            $fields['runtime_minutes'] = null;
+        }
+
+        if (isset($fields['format_id']) && $fields['format_id'] !== null && $fields['format_id'] !== '') {
+            $fields['format_id'] = (int)$fields['format_id'];
+        } else {
+            $fields['format_id'] = null;
+        }
+
+        // watched_at validation happens in model (DateTime parse). Optionally pre-validate format
+        if (isset($fields['watched_at']) && $fields['watched_at']) {
+            try { new \DateTimeImmutable((string)$fields['watched_at']); } catch (\Throwable $e) {
+                return $this->json(['success' => false, 'error' => 'Invalid date/time provided'], 400);
+            }
+        }
+
+        // Update via model (also enforces ownership)
+        $result = WatchedLog::update($user->getId(), $logId, $fields);
+        if (!$result['ok']) {
+            return $this->json(['success' => false, 'error' => 'Failed to update viewing entry'], 500);
+        }
+
+        $tmdbId = (int)($result['tmdb_id'] ?? 0);
+        $db = Database::getInstance();
+        $r = $db->prepare("SELECT watched_count, last_watched_at FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
+        $r->execute([$user->getId(), $tmdbId]);
+        $roll = $r->fetch() ?: ['watched_count' => 0, 'last_watched_at' => null];
+
+        return $this->json([
+            'success' => true,
+            'tmdb_id' => $tmdbId,
+            'watched_count' => (int)($roll['watched_count'] ?? 0),
+            'last_watched_at' => $roll['last_watched_at'] ?? null,
+        ]);
     }
 
     /**

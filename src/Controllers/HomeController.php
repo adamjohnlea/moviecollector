@@ -23,6 +23,7 @@ class HomeController extends Controller
         
         // Get popular movies if the user has TMDb credentials
         $popularMovies = [];
+        $recentlyWatched = [];
         if ($user) {
             $userSettings = UserSettings::getByUserId($user->getId());
             
@@ -50,6 +51,36 @@ class HomeController extends Controller
                         }
                     }
                 }
+
+                // Recently watched widget (last 10 for current user)
+                try {
+                    $logs = \App\Models\WatchedLog::getRecentByUser($user->getId(), 10);
+                    foreach ($logs as $log) {
+                        // Load user's movie row to get title and local poster if present
+                        $stmt = \App\Database\Database::getInstance()->prepare("SELECT * FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
+                        $stmt->execute([$user->getId(), (int)$log['tmdb_id']]);
+                        $row = $stmt->fetch();
+                        if (!$row) { continue; }
+                        $item = [
+                            'tmdb_id' => (int)$log['tmdb_id'],
+                            'watched_at' => $log['watched_at'],
+                            'title' => $row['title'] ?? 'Untitled',
+                        ];
+                        // Determine poster URL: prefer local_poster_path, else TMDb URL
+                        if (!empty($row['local_poster_path'])) {
+                            // Cache-bust with last_updated_at
+                            $version = isset($row['last_updated_at']) ? rawurlencode((string)$row['last_updated_at']) : '';
+                            $item['poster_url'] = $row['local_poster_path'] . ($version ? ('?v=' . $version) : '');
+                        } elseif (!empty($row['poster_path'])) {
+                            $item['poster_url'] = $tmdbService->getImageUrl($row['poster_path'], 'w342');
+                        } else {
+                            $item['poster_url'] = null;
+                        }
+                        $recentlyWatched[] = $item;
+                    }
+                } catch (\Throwable $e) {
+                    Logger::error('Recently watched widget failed', ['error' => $e->getMessage()]);
+                }
             }
         }
         
@@ -57,6 +88,7 @@ class HomeController extends Controller
         return $this->renderResponse('home.twig', [
             'user' => $user,
             'popular_movies' => $popularMovies,
+            'recently_watched' => $recentlyWatched,
         ]);
     }
-} 
+}

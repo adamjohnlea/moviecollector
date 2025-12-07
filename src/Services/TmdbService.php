@@ -116,6 +116,52 @@ class TmdbService
             return null;
         }
     }
+
+    /**
+     * Cached search for movies. Stores cached JSON under var/cache/search/ with TTL.
+     * On API failure, serves last good cached result (stale-on-error).
+     */
+    public function searchMoviesCached(string $query, int $page = 1, ?int $ttlSeconds = null): ?array
+    {
+        $ttl = $ttlSeconds ?? (int)(getenv('SEARCH_TTL_SECONDS') ?: 900); // default 15 minutes
+        $searchDir = $this->cacheDir . '/search';
+        if (!is_dir($searchDir)) {@mkdir($searchDir, 0755, true);}        
+        $key = substr(sha1(trim(mb_strtolower($query)) . '|' . max(1, (int)$page)), 0, 24);
+        $cachePath = $searchDir . '/q_' . $key . '.json';
+
+        // Try cache
+        if (is_readable($cachePath)) {
+            $raw = @file_get_contents($cachePath);
+            $data = $raw ? json_decode($raw, true) : null;
+            if (is_array($data) && isset($data['_saved_at'], $data['payload'])) {
+                if (time() - (int)$data['_saved_at'] < $ttl) {
+                    Logger::info('TMDb search cache hit', ['page' => $page, 'ttl' => $ttl]);
+                    return $data['payload'];
+                }
+            }
+        }
+
+        // Network
+        $response = $this->searchMovies($query, $page);
+        if ($response) {
+            $payload = ['_saved_at' => time(), 'payload' => $response];
+            @file_put_contents($cachePath, json_encode($payload));
+            @chmod($cachePath, 0644);
+            Logger::info('TMDb search cache refreshed', ['page' => $page]);
+            return $response;
+        }
+
+        // Serve stale
+        if (is_readable($cachePath)) {
+            $raw = @file_get_contents($cachePath);
+            $data = $raw ? json_decode($raw, true) : null;
+            if (is_array($data) && isset($data['payload'])) {
+                Logger::warning('TMDb search failed, serving stale cache', ['page' => $page]);
+                return $data['payload'];
+            }
+        }
+        return null;
+    }
     
     /**
      * Get movie details including certifications, keywords, and watch providers

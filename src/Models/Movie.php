@@ -30,6 +30,8 @@ class Movie
     private ?string $localPosterPath;
     private ?string $localBackdropPath;
     private string $lastUpdatedAt;
+    private ?int $watchedCount = null;
+    private ?string $lastWatchedAt = null;
     private ?string $originalTitle;
     private ?string $tagline;
     private ?string $status;
@@ -341,6 +343,8 @@ class Movie
         $movie->localPosterPath = $data['local_poster_path'] ?? null;
         $movie->localBackdropPath = $data['local_backdrop_path'] ?? null;
         $movie->lastUpdatedAt = $data['last_updated_at'];
+        $movie->watchedCount = isset($data['watched_count']) ? (int)$data['watched_count'] : 0;
+        $movie->lastWatchedAt = $data['last_watched_at'] ?? null;
         $movie->originalTitle = $data['original_title'] ?? null;
         $movie->tagline = $data['tagline'] ?? null;
         $movie->status = $data['status'] ?? null;
@@ -594,6 +598,23 @@ class Movie
     {
         return $this->externalIds ?? null;
     }
+
+    /**
+     * Get total watched count for this movie (roll-up)
+     */
+    public function getWatchedCount(): int
+    {
+        return (int)($this->watchedCount ?? 0);
+    }
+
+    /**
+     * Get last watched timestamp (UTC string) for this movie (roll-up)
+     */
+    public function getLastWatchedAt(): ?string
+    {
+        return $this->lastWatchedAt;
+    }
+
     
     /**
      * Update cached movie data

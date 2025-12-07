@@ -74,13 +74,18 @@ class UserController extends Controller
         
         $user = SessionService::getCurrentUser();
         $userSettings = UserSettings::getByUserId($user->getId());
+        // Build a reasonable list of timezones (COMMON to avoid an extremely long list)
+        $tzList = \DateTimeZone::listIdentifiers(\DateTimeZone::ALL);
+        sort($tzList);
         
         return $this->renderResponse('user/settings.twig', [
             'user' => $user,
             'user_settings' => $userSettings,
             'error' => null,
             'success' => null,
-            'sections' => $this->getMovieDetailSections()
+            'sections' => $this->getMovieDetailSections(),
+            'timezones' => $tzList,
+            'active_timezone' => $userSettings ? $userSettings->getTimezone() : 'UTC'
         ]);
     }
     
@@ -108,6 +113,8 @@ class UserController extends Controller
         $user = SessionService::getCurrentUser();
         $tmdbApiKey = $request->request->get('tmdb_api_key');
         $tmdbAccessToken = $request->request->get('tmdb_access_token');
+        $timezone = $request->request->get('timezone');
+        $autoRemove = $request->request->has('auto_remove_to_watch');
         
         // Update settings
         $updated = true;
@@ -120,15 +127,26 @@ class UserController extends Controller
             $updated = UserSettings::updateTmdbAccessToken($user->getId(), $tmdbAccessToken) && $updated;
         }
         
+        if ($timezone !== null) {
+            $updated = UserSettings::updateTimezone($user->getId(), (string)$timezone) && $updated;
+        }
+
+        // Update auto-remove setting
+        $updated = UserSettings::updateAutoRemoveToWatchOnWatched($user->getId(), (bool)$autoRemove) && $updated;
+        
         // Get updated settings
         $userSettings = UserSettings::getByUserId($user->getId());
+        $tzList = \DateTimeZone::listIdentifiers(\DateTimeZone::ALL);
+        sort($tzList);
         
         return $this->renderResponse('user/settings.twig', [
             'user' => $user,
             'user_settings' => $userSettings,
             'success' => $updated ? 'Settings updated successfully.' : null,
             'error' => !$updated ? 'There was a problem updating your settings.' : null,
-            'sections' => $this->getMovieDetailSections()
+            'sections' => $this->getMovieDetailSections(),
+            'timezones' => $tzList,
+            'active_timezone' => $userSettings ? $userSettings->getTimezone() : 'UTC'
         ]);
     }
     

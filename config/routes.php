@@ -11,9 +11,13 @@ use App\Controllers\HomeController;
 use App\Controllers\AuthController;
 use App\Controllers\MovieController;
 use App\Controllers\UserController;
+use App\Controllers\WatchlogController;
 
 // Home routes
 $router->get('/', [HomeController::class, 'index']);
+
+// Watchlog
+$router->get('/watchlog', [WatchlogController::class, 'index']);
 
 // Authentication routes
 $router->get('/login', [AuthController::class, 'showLoginForm']);

@@ -34,6 +34,9 @@
                             <a href="/to-buy" class="text-white hover:text-indigo-200 {{ current_route == '/to-buy' ? 'font-semibold' : '' }}">
                                 To Buy
                             </a>
+                            <a href="/watchlog" class="text-white hover:text-indigo-200 {{ current_route starts with '/watchlog' ? 'font-semibold' : '' }}">
+                                Watchlog
+                            </a>
                             <a href="/movies/search" class="text-white hover:text-indigo-200 {{ current_route starts with '/movies/search' ? 'font-semibold' : '' }}">
                                 Search
                             </a>
@@ -81,6 +84,9 @@
                     </a>
                     <a href="/to-buy" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800 {{ current_route == '/to-buy' ? 'bg-indigo-800 font-semibold' : '' }}">
                         To Buy
+                    </a>
+                    <a href="/watchlog" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800 {{ current_route starts with '/watchlog' ? 'bg-indigo-800 font-semibold' : '' }}">
+                        Watchlog
                     </a>
                     <a href="/movies/search" class="block px-3 py-2 rounded-md text-white hover:bg-indigo-800 {{ current_route starts with '/movies/search' ? 'bg-indigo-800 font-semibold' : '' }}">
                         Search

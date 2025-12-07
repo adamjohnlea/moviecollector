@@ -203,24 +203,22 @@ class MovieController extends Controller
             'list_type' => $currentListType
         ]);
         
-        // For owned movies, load formats the user has selected
+        // Load formats list for the Format dropdown on the Watched panel (always needed)
         $userFormats = [];
         $allFormats = [];
-        if ($isOwned) {
-            // Check if the MovieFormat class exists
-            if (class_exists('\\App\\Models\\MovieFormat')) {
-                try {
-                    // Load all available formats grouped by category
-                    $allFormats = \App\Models\MovieFormat::getFormatsByCategory();
-                    
-                    // Load user's selected formats for this movie
+        if (class_exists('\\App\\Models\\MovieFormat')) {
+            try {
+                // Load all available formats grouped by category
+                $allFormats = \App\Models\MovieFormat::getFormatsByCategory();
+                // Load user's selected formats for this movie (only meaningful when owned)
+                if ($isOwned) {
                     $userFormats = \App\Models\MovieFormat::getFormatsForUserMovie($user->getId(), $tmdbId);
-                } catch (\Exception $e) {
-                    LoggerService::error('Error loading movie formats', [
-                        'message' => $e->getMessage(),
-                        'movie_id' => $tmdbId
-                    ]);
                 }
+            } catch (\Exception $e) {
+                LoggerService::error('Error loading movie formats', [
+                    'message' => $e->getMessage(),
+                    'movie_id' => $tmdbId
+                ]);
             }
         }
         

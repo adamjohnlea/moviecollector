@@ -15,6 +15,7 @@ class TmdbService
     private ?string $apiKey;
     private ?string $accessToken;
     private ?array $configuration = null;
+    private string $cacheDir;
     
     /**
      * Create a new TMDb service instance
@@ -27,12 +28,17 @@ class TmdbService
             'verify' => true,
             'http_errors' => false  // Don't throw exceptions for HTTP errors
         ]);
+        // Determine cache directory
+        $this->cacheDir = dirname(__DIR__, 2) . '/var/cache';
+        if (!is_dir($this->cacheDir)) {
+            @mkdir($this->cacheDir, 0755, true);
+        }
         
         if ($userSettings) {
             $this->apiKey = $userSettings->getTmdbApiKey();
             $this->accessToken = $userSettings->getTmdbAccessToken();
             
-            // Load configuration immediately
+            // Load configuration (may come from persistent cache)
             $this->configuration = $this->getConfiguration();
         } else {
             $this->apiKey = null;
@@ -168,6 +174,53 @@ class TmdbService
             return null;
         }
     }
+
+    /**
+     * Get popular movies with a short-lived persistent cache.
+     * Default TTL: 1800 seconds (30 minutes).
+     */
+    public function getPopularMoviesCached(int $page = 1, ?int $ttlSeconds = null): ?array
+    {
+        $ttl = $ttlSeconds ?? (int) (getenv('POPULAR_TTL_SECONDS') ?: 1800);
+        $cachePath = $this->cacheDir . '/tmdb_popular_page' . max(1, (int)$page) . '.json';
+
+        // Try cache
+        if (is_readable($cachePath)) {
+            $raw = @file_get_contents($cachePath);
+            $data = $raw ? json_decode($raw, true) : null;
+            if (is_array($data) && isset($data['_saved_at'], $data['payload'])) {
+                if (time() - (int)$data['_saved_at'] < $ttl) {
+                    Logger::info('TMDb popular cache hit', ['page' => $page, 'ttl' => $ttl]);
+                    return $data['payload'];
+                }
+            }
+        }
+
+        // Fallback to network
+        $response = $this->getPopularMovies($page);
+        if ($response) {
+            // Save cache
+            $payload = [
+                '_saved_at' => time(),
+                'payload' => $response,
+            ];
+            @file_put_contents($cachePath, json_encode($payload));
+            @chmod($cachePath, 0644);
+            Logger::info('TMDb popular cache refreshed', ['page' => $page]);
+            return $response;
+        }
+
+        // On error, serve stale cache if available
+        if (is_readable($cachePath)) {
+            $raw = @file_get_contents($cachePath);
+            $data = $raw ? json_decode($raw, true) : null;
+            if (is_array($data) && isset($data['payload'])) {
+                Logger::warning('TMDb popular API failed, serving stale cache', ['page' => $page]);
+                return $data['payload'];
+            }
+        }
+        return null;
+    }
     
     /**
      * Get configuration data (image URLs, etc.)
@@ -177,15 +230,49 @@ class TmdbService
         if ($this->configuration !== null) {
             return $this->configuration;
         }
+        $ttl = (int) (getenv('TMDB_CONFIG_TTL_SECONDS') ?: 86400); // 24h default
+        $cachePath = $this->cacheDir . '/tmdb_configuration.json';
 
+        // Try persistent cache
+        if (is_readable($cachePath)) {
+            $raw = @file_get_contents($cachePath);
+            $data = $raw ? json_decode($raw, true) : null;
+            if (is_array($data) && isset($data['_saved_at'], $data['payload'])) {
+                if (time() - (int)$data['_saved_at'] < $ttl) {
+                    Logger::info('TMDb configuration cache hit');
+                    $this->configuration = $data['payload'];
+                    return $this->configuration;
+                }
+            }
+        }
+
+        // Fetch from API
         try {
             $response = $this->request('GET', '/configuration');
             if ($response) {
+                // Save persistent cache
+                $payload = [
+                    '_saved_at' => time(),
+                    'payload' => $response,
+                ];
+                @file_put_contents($cachePath, json_encode($payload));
+                @chmod($cachePath, 0644);
+                Logger::info('TMDb configuration cache refreshed');
                 $this->configuration = $response;
             }
             return $response;
         } catch (RequestException $e) {
             Logger::error('TMDb getConfiguration failed', ['error' => $e->getMessage()]);
+            // If API fails, try to return stale cache as last resort
+            if (is_readable($cachePath)) {
+                $raw = @file_get_contents($cachePath);
+                $data = $raw ? json_decode($raw, true) : null;
+                if (is_array($data) && isset($data['payload'])) {
+                    Logger::warning('Serving stale TMDb configuration from cache');
+                    $this->configuration = $data['payload'];
+                    return $this->configuration;
+                }
+            }
             return null;
         }
     }

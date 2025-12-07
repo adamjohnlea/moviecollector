@@ -8,11 +8,17 @@
             <h1 class="text-3xl font-bold">{{ title }}</h1>
             <div class="flex gap-4">
                 {% if movies|length > 0 %}
-                    <button 
-                        onclick="refreshMovies()"
-                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
-                        Refresh Movie Data
-                    </button>
+                    <div class="flex items-center gap-3">
+                        <label class="inline-flex items-center text-sm text-gray-700 dark:text-gray-300">
+                            <input id="keep-local-poster-bulk" type="checkbox" checked class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
+                            Keep my uploaded posters
+                        </label>
+                        <button 
+                            onclick="refreshMovies()"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                            Refresh Movie Data
+                        </button>
+                    </div>
                 {% endif %}
                 <a href="/movies/search" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                     Add Movies
@@ -126,7 +132,10 @@ function refreshMovies() {
         headers: {
             'Content-Type': 'application/json',
             'X-CSRF-Token': '{{ csrf_token }}'
-        }
+        },
+        body: JSON.stringify({
+            keep_local_poster: document.getElementById('keep-local-poster-bulk')?.checked ?? false
+        })
     })
     .then(response => response.json())
     .then(data => {

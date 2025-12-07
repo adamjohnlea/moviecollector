@@ -871,6 +871,16 @@ class MovieController extends Controller
         }
         
         $tmdbService = new TmdbService($userSettings);
+
+        // Read options from JSON body (if provided)
+        $keepLocalPoster = false;
+        $contentType = $request->headers->get('Content-Type') ?: '';
+        if (stripos($contentType, 'application/json') !== false) {
+            $payload = json_decode((string)$request->getContent(), true);
+            if (is_array($payload) && isset($payload['keep_local_poster'])) {
+                $keepLocalPoster = (bool)$payload['keep_local_poster'];
+            }
+        }
         
         // Get all movies from user's lists
         $db = Database::getInstance();
@@ -902,11 +912,16 @@ class MovieController extends Controller
             // Cache images if they exist
             $localPosterPath = null;
             $localBackdropPath = null;
-            
-            if (!empty($freshData['poster_path'])) {
-                $posterUrl = $tmdbService->getImageUrl($freshData['poster_path']);
-                if ($posterUrl) {
-                    $localPosterPath = ImageCache::cacheImage($posterUrl, 'poster');
+
+            // Determine poster strategy respecting user preference to keep custom poster
+            if ($keepLocalPoster && !empty($movieData['local_poster_path'])) {
+                $localPosterPath = $movieData['local_poster_path'];
+            } else {
+                if (!empty($freshData['poster_path'])) {
+                    $posterUrl = $tmdbService->getImageUrl($freshData['poster_path']);
+                    if ($posterUrl) {
+                        $localPosterPath = ImageCache::cacheImage($posterUrl, 'poster');
+                    }
                 }
             }
             
@@ -917,22 +932,17 @@ class MovieController extends Controller
                 }
             }
             
-            // Update the movie in the database with fresh data
-            $stmt = $db->prepare("
-                UPDATE movies
+            // Build dynamic SQL to optionally preserve local_poster_path untouched
+            $baseSql = "UPDATE movies
                 SET title = ?, poster_path = ?, backdrop_path = ?, overview = ?,
                     release_date = ?, genres = ?, runtime = ?, vote_average = ?,
                     vote_count = ?, production_companies = ?, original_title = ?,
                     tagline = ?, status = ?, production_countries = ?,
                     spoken_languages = ?, budget = ?, revenue = ?, homepage = ?,
                     imdb_id = ?, original_language = ?, popularity = ?,
-                    adult = ?, video = ?, local_poster_path = ?,
-                    local_backdrop_path = ?, certifications = ?, keywords = ?,
-                    watch_providers = ?, last_updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ");
-            
-            $success = $stmt->execute([
+                    adult = ?, video = ?, ";
+
+            $params = [
                 $freshData['title'],
                 $freshData['poster_path'] ?? null,
                 $freshData['backdrop_path'] ?? null,
@@ -956,12 +966,40 @@ class MovieController extends Controller
                 $freshData['popularity'] ?? null,
                 $freshData['adult'] ?? false ? 1 : 0,
                 $freshData['video'] ?? false ? 1 : 0,
-                $localPosterPath,
-                $localBackdropPath,
-                $freshData['certifications'] ?? null,
-                $freshData['keywords'] ?? null,
-                $freshData['watch_providers'] ?? null,
-                $movieData['id']
+            ];
+
+            $preserved = false;
+            if ($keepLocalPoster && !empty($movieData['local_poster_path'])) {
+                // Do not touch local_poster_path field
+                $baseSql .= "local_backdrop_path = ?, certifications = ?, keywords = ?,
+                    watch_providers = ?, last_updated_at = CURRENT_TIMESTAMP WHERE id = ?";
+                $params[] = $localBackdropPath;
+                $params[] = $freshData['certifications'] ?? null;
+                $params[] = $freshData['keywords'] ?? null;
+                $params[] = $freshData['watch_providers'] ?? null;
+                $params[] = $movieData['id'];
+                $preserved = true;
+            } else {
+                $baseSql .= "local_poster_path = ?, local_backdrop_path = ?, certifications = ?, keywords = ?,
+                    watch_providers = ?, last_updated_at = CURRENT_TIMESTAMP WHERE id = ?";
+                $params[] = $localPosterPath;
+                $params[] = $localBackdropPath;
+                $params[] = $freshData['certifications'] ?? null;
+                $params[] = $freshData['keywords'] ?? null;
+                $params[] = $freshData['watch_providers'] ?? null;
+                $params[] = $movieData['id'];
+            }
+
+            $stmt = $db->prepare($baseSql);
+            $success = $stmt->execute($params);
+
+            LoggerService::info('Bulk refresh poster handling', [
+                'tmdb_id' => $movieData['tmdb_id'],
+                'keep_local_poster' => $keepLocalPoster ? 'yes' : 'no',
+                'had_custom_before' => !empty($movieData['local_poster_path']) ? 'yes' : 'no',
+                'preserved_local' => $preserved ? 'yes' : 'no',
+                'new_local_poster_path' => $preserved ? $movieData['local_poster_path'] : ($localPosterPath ?? 'null'),
+                'success' => $success ? 'yes' : 'no'
             ]);
             
             if ($success) {
@@ -1064,4 +1102,331 @@ class MovieController extends Controller
         // Redirect back to the movie page
         return $this->redirect('/movies/' . $id);
     }
-} 
+
+    /**
+     * Refresh a single movie's data from TMDb, with option to keep user's custom poster
+     */
+    public function refreshSingleMovie(Request $request, array $params): Response
+    {
+        // Require login
+        $redirect = $this->requireLogin();
+        if ($redirect) {
+            return $redirect;
+        }
+
+        // Validate movie id
+        $tmdbId = (int)($params['id'] ?? 0);
+        if ($tmdbId <= 0) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Invalid movie ID'], 400);
+            }
+            return $this->redirect('/collection');
+        }
+
+        // CSRF token (form or header)
+        $token = $request->request->get('csrf_token') ?: $request->headers->get('X-CSRF-Token');
+        if (!$this->verifyCsrfToken($token)) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Invalid CSRF token'], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        $user = SessionService::getCurrentUser();
+
+        // Ensure user has TMDb credentials
+        $userSettings = UserSettings::getByUserId($user->getId());
+        if (!$userSettings || !$userSettings->hasValidTmdbCredentials()) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Missing TMDb credentials'], 400);
+            }
+            return $this->redirect('/settings');
+        }
+
+        // Ensure movie exists for this user
+        $db = Database::getInstance();
+        $stmt = $db->prepare("SELECT * FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
+        $stmt->execute([$user->getId(), $tmdbId]);
+        $movieRow = $stmt->fetch();
+        if (!$movieRow) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Movie not found in your lists'], 404);
+            }
+            return $this->redirect('/collection');
+        }
+
+        // Respect keep_local_poster flag (form checkbox or JSON)
+        $keepLocalPoster = false;
+        if ($request->isXmlHttpRequest()) {
+            $payload = json_decode((string)$request->getContent(), true);
+            if (is_array($payload) && isset($payload['keep_local_poster'])) {
+                $keepLocalPoster = (bool)$payload['keep_local_poster'];
+            }
+        } else {
+            $keepLocalPoster = (bool)$request->request->get('keep_local_poster', false);
+        }
+
+        $tmdbService = new TmdbService($userSettings);
+
+        try {
+            $freshData = $tmdbService->getMovie($tmdbId);
+            if (!$freshData) {
+                if ($request->isXmlHttpRequest()) {
+                    return $this->json(['success' => false, 'error' => 'Failed to fetch data from TMDb'], 502);
+                }
+                return $this->redirect('/movies/' . $tmdbId);
+            }
+
+            // Prepare image caching respecting flag
+            $localPosterPath = null;
+            if ($keepLocalPoster && !empty($movieRow['local_poster_path'])) {
+                $localPosterPath = $movieRow['local_poster_path'];
+            } else {
+                if (!empty($freshData['poster_path'])) {
+                    $posterUrl = $tmdbService->getImageUrl($freshData['poster_path']);
+                    if ($posterUrl) {
+                        $localPosterPath = ImageCache::cacheImage($posterUrl, 'poster');
+                    }
+                }
+            }
+
+            $localBackdropPath = null;
+            if (!empty($freshData['backdrop_path'])) {
+                $backdropUrl = $tmdbService->getImageUrl($freshData['backdrop_path'], 'original');
+                if ($backdropUrl) {
+                    $localBackdropPath = ImageCache::cacheImage($backdropUrl, 'backdrop');
+                }
+            }
+
+            // Update DB
+            $upd = $db->prepare("UPDATE movies
+                SET title = ?, poster_path = ?, backdrop_path = ?, overview = ?,
+                    release_date = ?, genres = ?, runtime = ?, vote_average = ?,
+                    vote_count = ?, production_companies = ?, original_title = ?,
+                    tagline = ?, status = ?, production_countries = ?,
+                    spoken_languages = ?, budget = ?, revenue = ?, homepage = ?,
+                    imdb_id = ?, original_language = ?, popularity = ?,
+                    adult = ?, video = ?, local_poster_path = ?,
+                    local_backdrop_path = ?, certifications = ?, keywords = ?,
+                    watch_providers = ?, last_updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?");
+
+            $ok = $upd->execute([
+                $freshData['title'],
+                $freshData['poster_path'] ?? null,
+                $freshData['backdrop_path'] ?? null,
+                $freshData['overview'] ?? null,
+                $freshData['release_date'] ?? null,
+                isset($freshData['genres']) ? json_encode($freshData['genres']) : null,
+                $freshData['runtime'] ?? null,
+                $freshData['vote_average'] ?? null,
+                $freshData['vote_count'] ?? null,
+                isset($freshData['production_companies']) ? json_encode($freshData['production_companies']) : null,
+                $freshData['original_title'] ?? null,
+                $freshData['tagline'] ?? null,
+                $freshData['status'] ?? null,
+                isset($freshData['production_countries']) ? json_encode($freshData['production_countries']) : null,
+                isset($freshData['spoken_languages']) ? json_encode($freshData['spoken_languages']) : null,
+                $freshData['budget'] ?? null,
+                $freshData['revenue'] ?? null,
+                $freshData['homepage'] ?? null,
+                $freshData['imdb_id'] ?? null,
+                $freshData['original_language'] ?? null,
+                $freshData['popularity'] ?? null,
+                $freshData['adult'] ?? false ? 1 : 0,
+                $freshData['video'] ?? false ? 1 : 0,
+                $localPosterPath,
+                $localBackdropPath,
+                $freshData['certifications'] ?? null,
+                $freshData['keywords'] ?? null,
+                $freshData['watch_providers'] ?? null,
+                $movieRow['id']
+            ]);
+
+            LoggerService::info('Single movie refresh completed', [
+                'user_id' => $user->getId(),
+                'tmdb_id' => $tmdbId,
+                'kept_local_poster' => $keepLocalPoster && !empty($movieRow['local_poster_path']) ? 'yes' : 'no',
+                'success' => $ok ? 'yes' : 'no'
+            ]);
+
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => (bool)$ok]);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        } catch (\Throwable $e) {
+            LoggerService::error('Single movie refresh failed', [
+                'tmdb_id' => $tmdbId,
+                'error' => $e->getMessage()
+            ]);
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Refresh failed'], 500);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+    }
+
+    /**
+     * Upload/replace a custom poster image for a movie in the user's Owned Media
+     */
+    public function uploadPoster(Request $request, array $params): Response
+    {
+        // Require login
+        $user = SessionService::getCurrentUser();
+        if (!$user) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'You must be logged in'], 401);
+            }
+            return $this->redirect('/login');
+        }
+
+        $tmdbId = (int)($params['id'] ?? 0);
+        if ($tmdbId <= 0) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Invalid movie ID'], 400);
+            }
+            return $this->redirect('/collection');
+        }
+
+        // CSRF
+        $token = $request->request->get('csrf_token');
+        if (!$this->verifyCsrfToken($token)) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Invalid CSRF token'], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Verify movie is in user's Owned Media
+        $listType = Movie::getListType($user->getId(), $tmdbId);
+        if ($listType !== Movie::LIST_COLLECTION) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Movie must be in your Owned Media to set a custom poster'], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Validate uploaded file
+        $file = $request->files->get('poster');
+        if (!$file) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'No file uploaded'], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Allowed mime types
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+
+        // Safely detect MIME type without requiring symfony/mime
+        $mime = null;
+        try {
+            // This may throw if symfony/mime isn't installed
+            $mime = $file->getMimeType();
+        } catch (\Throwable $e) {
+            // ignore and try other methods
+            \App\Services\LoggerService::warning('Uploaded file getMimeType failed, falling back to finfo/magic bytes', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Fallback to finfo
+        if (!$mime && function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo) {
+                $mime = finfo_file($finfo, $file->getPathname()) ?: null;
+                finfo_close($finfo);
+            }
+        }
+
+        // Fallback to simple magic byte checks
+        if (!$mime) {
+            $fh = @fopen($file->getPathname(), 'rb');
+            if ($fh) {
+                $sig = fread($fh, 12);
+                fclose($fh);
+                if ($sig !== false) {
+                    if (strncmp($sig, "\xFF\xD8\xFF", 3) === 0) {
+                        $mime = 'image/jpeg';
+                    } elseif (strncmp($sig, "\x89PNG\x0D\x0A\x1A\x0A", 8) === 0) {
+                        $mime = 'image/png';
+                    } elseif (strncmp($sig, 'RIFF', 4) === 0 && substr($sig, 8, 4) === 'WEBP') {
+                        $mime = 'image/webp';
+                    }
+                }
+            }
+        }
+
+        $ext = $mime && isset($allowed[$mime]) ? $allowed[$mime] : null;
+        if (!$ext) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Unsupported image type. Allowed: JPG, PNG, WEBP'], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Limit size to 5 MB
+        $maxBytes = 5_242_880;
+        if ($file->getSize() > $maxBytes) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'File too large (max 5 MB)'], 400);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Ensure destination directory exists
+        $destDir = __DIR__ . '/../../public/uploads/posters';
+        if (!is_dir($destDir) && !mkdir($destDir, 0755, true) && !is_dir($destDir)) {
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Server error: cannot create upload directory'], 500);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+
+        // Generate unique safe filename
+        $safeBase = sprintf('u%d_m%d_%d_%s', $user->getId(), $tmdbId, time(), bin2hex(random_bytes(4)));
+        $filename = $safeBase . '.' . $ext;
+        $fullPath = rtrim($destDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $filename;
+
+        try {
+            // Remove previous local poster if any
+            $stmt = Database::getInstance()->prepare("SELECT local_poster_path FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
+            $stmt->execute([$user->getId(), $tmdbId]);
+            $row = $stmt->fetch();
+            if ($row && !empty($row['local_poster_path'])) {
+                ImageCache::removeImage($row['local_poster_path']);
+            }
+
+            // Move file
+            $file->move($destDir, $filename);
+            @chmod($fullPath, 0644);
+
+            $webPath = '/uploads/posters/' . $filename;
+
+            // Update DB
+            $upd = Database::getInstance()->prepare("UPDATE movies SET local_poster_path = ?, last_updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND tmdb_id = ?");
+            $ok = $upd->execute([$webPath, $user->getId(), $tmdbId]);
+
+            LoggerService::info('User uploaded custom poster', [
+                'user_id' => $user->getId(),
+                'tmdb_id' => $tmdbId,
+                'path' => $webPath,
+                'success' => $ok ? 'yes' : 'no'
+            ]);
+
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => (bool)$ok, 'poster_url' => $webPath]);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        } catch (\Throwable $e) {
+            LoggerService::error('Poster upload failed', [
+                'message' => $e->getMessage(),
+                'tmdb_id' => $tmdbId,
+            ]);
+            if ($request->isXmlHttpRequest()) {
+                return $this->json(['success' => false, 'error' => 'Upload failed'], 500);
+            }
+            return $this->redirect('/movies/' . $tmdbId);
+        }
+    }
+}

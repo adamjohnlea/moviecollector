@@ -14,6 +14,7 @@ A personal movie collection application built with PHP 8.4, Twig, Tailwind CSS, 
   - Detailed movie information including posters, release dates, and descriptions
   - Visual indicators for movies already in your collection
 - Personal movie collection management
+- For Owned Media, replace TMDb poster with your own uploaded image
 - Responsive design with Tailwind CSS
 - Custom logging system for error tracking and debugging
   - Detailed API request/response logging
@@ -26,7 +27,13 @@ A personal movie collection application built with PHP 8.4, Twig, Tailwind CSS, 
 - Composer
 - TMDb API key (each user needs their own)
 - Web server with URL rewriting support (Herd, Apache, Nginx, etc.)
-- Writable permissions for cache, logs, and data directories
+- Writable permissions for cache, logs, data, and uploads directories
+  - logs/
+  - data/
+  - var/cache/
+  - public/uploads/ (and its subfolders: posters/, backdrops/)
+  
+Tip: The poster upload feature validates images without extra Composer packages. The PHP fileinfo extension (finfo) is recommended but not strictly required.
 
 ## Installation
 
@@ -92,6 +99,18 @@ A personal movie collection application built with PHP 8.4, Twig, Tailwind CSS, 
    - Each movie shows its poster, title, release year, and overview
    - Movies already in your collection are clearly marked
 5. View and manage your movie collection
+6. Replace a poster image (Owned Media only):
+   - Open a movie that’s in your Owned Media
+   - Use the "Upload/Replace Poster" control to select an image (JPG/PNG/WEBP, max 5 MB)
+   - Your uploaded poster will be used instead of the TMDb image
+   - If you previously uploaded a custom poster for this movie, it will be replaced
+   - If you don’t see the change immediately, perform a hard refresh to bypass browser cache
+
+### Notes on poster uploads
+- Supported types: JPEG (.jpg), PNG (.png), WEBP (.webp)
+- Max size: 5 MB
+- Storage location: files are saved under `public/uploads/posters/` with safe, unique names
+- Security: uploads are only allowed for movies in your Owned Media and require a valid CSRF token
 
 ## Development
 
@@ -130,6 +149,15 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - SQLite database
 - The Movie Database (TMDb) API
 - Symfony HTTP Foundation components
+
+## Troubleshooting
+
+- Poster upload doesn’t seem to apply:
+  - Ensure the movie is in your Owned Media (uploads are not available for other lists)
+  - Verify the image is JPG/PNG/WEBP and under 5 MB
+  - Make sure `public/uploads/` (and subfolders) are writable by the web server
+  - Hard‑refresh the movie page to avoid cached images
+  - Check `logs/app.log` for entries like `User uploaded custom poster` or any warnings/errors
 
 ## License
 

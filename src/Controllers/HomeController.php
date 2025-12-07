@@ -27,14 +27,14 @@ class HomeController extends Controller
             $userSettings = UserSettings::getByUserId($user->getId());
             
             if ($userSettings && $userSettings->hasValidTmdbCredentials()) {
-                // Get popular movies from TMDb
+                // Get popular movies from TMDb with short-lived persistent cache
                 $tmdbService = new TmdbService($userSettings);
-                $response = $tmdbService->getPopularMovies();
+                $response = $tmdbService->getPopularMoviesCached();
                 
                 if ($response && isset($response['results'])) {
                     $popularMovies = $response['results'];
                     
-                    // Add full image URLs and check for cached images
+                    // Add full image URLs (no blocking server-side caching on homepage)
                     foreach ($popularMovies as &$movie) {
                         Logger::info("Processing popular movie", [
                             'title' => $movie['title'],
@@ -42,21 +42,10 @@ class HomeController extends Controller
                         ]);
                         
                         if (isset($movie['poster_path'])) {
-                            $posterUrl = $tmdbService->getImageUrl($movie['poster_path']);
+                            // Use a smaller size for faster first paint (w342)
+                            $posterUrl = $tmdbService->getImageUrl($movie['poster_path'], 'w342');
                             if ($posterUrl) {
-                                // Try to get cached image
-                                $localPath = ImageCache::cacheImage($posterUrl, 'poster');
-                                Logger::info("Caching result for popular movie", [
-                                    'title' => $movie['title'],
-                                    'local_path' => $localPath,
-                                    'tmdb_url' => $posterUrl
-                                ]);
-                                
-                                if ($localPath) {
-                                    $movie['poster_url'] = 'https://moviecollector.test' . $localPath;
-                                } else {
-                                    $movie['poster_url'] = $posterUrl;
-                                }
+                                $movie['poster_url'] = $posterUrl;
                             }
                         }
                     }

@@ -45,9 +45,29 @@
                                     {% endif %}
                                     <div class="p-4">
                                         <h3 class="font-bold text-gray-800 dark:text-white truncate">{{ item.title }}</h3>
-                                        <p class="text-xs text-gray-600 dark:text-gray-400" x-data="{ tz: '{{ user_timezone }}' }">
+                                        <p class="text-xs text-gray-600 dark:text-gray-400" x-data="{ tz: '{{ user_timezone }}' }"
+                                           x-init="
+                                             (() => {
+                                               const el = $el.querySelector('[data-ts]');
+                                               if (!el) return;
+                                               const ts = el.getAttribute('data-ts');
+                                               if (!ts) return;
+                                               let d;
+                                               // Handle 'YYYY-MM-DD' and 'YYYY-MM-DD HH:mm:ss'
+                                               if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
+                                                 d = new Date(ts + 'T00:00:00Z');
+                                               } else {
+                                                 d = new Date(ts.replace(' ', 'T') + 'Z');
+                                               }
+                                               try {
+                                                 el.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: tz }).format(d);
+                                               } catch (e) {
+                                                 el.textContent = d.toLocaleDateString();
+                                               }
+                                             })()
+                                           ">
                                             <span>Watched:</span>
-                                            <span x-init="(() => { const el = $el.querySelector('[data-ts]'); const ts = el.getAttribute('data-ts'); const iso = ts.replace(' ', 'T') + 'Z'; const d = new Date(iso); try { el.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(d); } catch(e) { el.textContent = d.toLocaleString(); } })()" data-ts="{{ item.watched_at }}"></span>
+                                            <span data-ts="{{ item.watched_at }}">{% if item.watched_at %}{{ item.watched_at|date("F j, Y") }}{% endif %}</span>
                                         </p>
                                     </div>
                                 </a>

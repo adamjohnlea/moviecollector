@@ -73,9 +73,26 @@ class Router
                 if (is_array($handler) && count($handler) === 2) {
                     [$controllerClass, $method] = $handler;
                     $controller = new $controllerClass();
-                    $response = $controller->$method($request, $matches);
+
+                    // Determine how many parameters the controller method expects
+                    $refMethod = new \ReflectionMethod($controllerClass, $method);
+                    $paramCount = $refMethod->getNumberOfParameters();
+
+                    if ($paramCount >= 2) {
+                        $response = $controller->$method($request, $matches);
+                    } else {
+                        $response = $controller->$method($request);
+                    }
                 } else {
-                    $response = $handler($request, $matches);
+                    // Generic callable (e.g., closure)
+                    $refFunc = \is_string($handler) ? new \ReflectionFunction($handler) : new \ReflectionFunction(\Closure::fromCallable($handler));
+                    $paramCount = $refFunc->getNumberOfParameters();
+
+                    if ($paramCount >= 2) {
+                        $response = $handler($request, $matches);
+                    } else {
+                        $response = $handler($request);
+                    }
                 }
                 
                 return $response instanceof Response 

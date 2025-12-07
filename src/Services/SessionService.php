@@ -72,7 +72,13 @@ class SessionService
     public static function isLoggedIn(): bool
     {
         self::start();
-        return isset($_SESSION[self::SESSION_USER_ID]);
+        if (!isset($_SESSION[self::SESSION_USER_ID])) {
+            return false;
+        }
+
+        // Ensure the user actually exists (guards against stale session IDs after DB reset)
+        $userId = (int) $_SESSION[self::SESSION_USER_ID];
+        return User::findById($userId) !== null;
     }
     
     /**

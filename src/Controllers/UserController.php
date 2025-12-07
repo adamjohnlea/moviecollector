@@ -103,10 +103,20 @@ class UserController extends Controller
         // Check CSRF token
         $token = $request->request->get('csrf_token');
         if (!$this->verifyCsrfToken($token)) {
+            $user = SessionService::getCurrentUser();
+            $userSettings = $user ? UserSettings::getByUserId($user->getId()) : null;
+            $tzList = \DateTimeZone::listIdentifiers(\DateTimeZone::ALL);
+            sort($tzList);
+
             return $this->renderResponse('user/settings.twig', [
+                'user' => $user,
+                'user_settings' => $userSettings,
                 'error' => 'Invalid request, please try again.',
                 'success' => null,
-                'sections' => $this->getMovieDetailSections()
+                'sections' => $this->getMovieDetailSections(),
+                'timezones' => $tzList,
+                'active_timezone' => $userSettings ? $userSettings->getTimezone() : 'UTC',
+                'active_tab' => 'settings'
             ]);
         }
         
@@ -164,10 +174,20 @@ class UserController extends Controller
         // Check CSRF token
         $token = $request->request->get('csrf_token');
         if (!$this->verifyCsrfToken($token)) {
+            $user = SessionService::getCurrentUser();
+            $userSettings = $user ? UserSettings::getByUserId($user->getId()) : null;
+            $tzList = \DateTimeZone::listIdentifiers(\DateTimeZone::ALL);
+            sort($tzList);
+
             return $this->renderResponse('user/settings.twig', [
+                'user' => $user,
+                'user_settings' => $userSettings,
                 'error' => 'Invalid request, please try again.',
                 'success' => null,
-                'sections' => $this->getMovieDetailSections()
+                'sections' => $this->getMovieDetailSections(),
+                'timezones' => $tzList,
+                'active_timezone' => $userSettings ? $userSettings->getTimezone() : 'UTC',
+                'active_tab' => 'display_preferences'
             ]);
         }
         
@@ -192,6 +212,9 @@ class UserController extends Controller
         
         // Get updated settings
         $userSettings = UserSettings::getByUserId($user->getId());
+        // Build timezone list for template (strict_variables requires it)
+        $tzList = \DateTimeZone::listIdentifiers(\DateTimeZone::ALL);
+        sort($tzList);
         
         return $this->renderResponse('user/settings.twig', [
             'user' => $user,
@@ -199,7 +222,9 @@ class UserController extends Controller
             'success' => $updated ? 'Display preferences updated successfully.' : null,
             'error' => !$updated ? 'There was a problem updating your display preferences.' : null,
             'sections' => $this->getMovieDetailSections(),
+            'timezones' => $tzList,
+            'active_timezone' => $userSettings ? $userSettings->getTimezone() : 'UTC',
             'active_tab' => 'display_preferences'
         ]);
     }
-} 
+}

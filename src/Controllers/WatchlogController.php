@@ -61,7 +61,10 @@ class WatchlogController extends Controller
             $m->execute([$user->getId(), $tmdbId]);
             $movieRow = $m->fetch() ?: [];
 
+            $title = $movieRow['title'] ?? null;
             $posterUrl = null;
+
+            // Prefer locally cached poster if available
             if (!empty($movieRow['local_poster_path'])) {
                 $version = isset($movieRow['last_updated_at']) ? rawurlencode((string)$movieRow['last_updated_at']) : '';
                 $posterUrl = $movieRow['local_poster_path'] . ($version ? ('?v=' . $version) : '');
@@ -70,10 +73,29 @@ class WatchlogController extends Controller
                 $posterUrl = $tmdb->getImageUrl($movieRow['poster_path'], 'w185');
             }
 
+            // Fallback: if movie is not in any of the user's lists (no row) or missing data,
+            // fetch minimal details from TMDb so the watchlog still shows a title/poster.
+            if ($tmdb && (!$title || !$posterUrl)) {
+                try {
+                    $apiData = $tmdb->getCompleteMovieDetails($tmdbId);
+                    if (!$title && isset($apiData['title'])) {
+                        $title = $apiData['title'];
+                    }
+                    if (!$posterUrl && !empty($apiData['poster_path'])) {
+                        $posterUrl = $tmdb->getImageUrl($apiData['poster_path'], 'w185');
+                    }
+                } catch (\Throwable $e) {
+                    Logger::warning('Failed to fetch TMDb fallback for watchlog item', [
+                        'tmdb_id' => $tmdbId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             $items[] = [
                 'id' => (int)$log['id'],
                 'tmdb_id' => $tmdbId,
-                'title' => $movieRow['title'] ?? 'Untitled',
+                'title' => $title ?: 'Untitled',
                 'poster_url' => $posterUrl,
                 'watched_at' => $log['watched_at'],
             ];

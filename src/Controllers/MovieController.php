@@ -470,6 +470,22 @@ class MovieController extends Controller
             $movieData['watched_count'] = $roll ? (int)($roll['watched_count'] ?? 0) : 0;
             $movieData['last_watched_at'] = $roll['last_watched_at'] ?? null;
             $movieData['last_updated_at'] = $roll['last_updated_at'] ?? ($movieData['last_updated_at'] ?? null);
+
+            // Fallback: when the movie isn't in any of the user's lists (no movies row),
+            // compute roll-ups directly from watched_logs so the UI reflects watch history
+            // for items added to the Watchlog from Search.
+            if (!$roll) {
+                try {
+                    $db = Database::getInstance();
+                    $r = $db->prepare("SELECT COUNT(*) AS cnt, MAX(watched_at) AS last_at FROM watched_logs WHERE user_id = ? AND tmdb_id = ?");
+                    $r->execute([$user->getId(), $tmdbId]);
+                    $agg = $r->fetch() ?: ['cnt' => 0, 'last_at' => null];
+                    $movieData['watched_count'] = (int)($agg['cnt'] ?? 0);
+                    $movieData['last_watched_at'] = $agg['last_at'] ?? null;
+                } catch (\Throwable $e) {
+                    // Best-effort; keep defaults on failure
+                }
+            }
         }
         
         // Define sections for the accordion UI
@@ -1380,19 +1396,115 @@ class MovieController extends Controller
         }
 
         if ($wantsJson) {
-            // Return updated roll-ups
+            // Return updated roll-ups (fallback to watched_logs if no movies row exists)
             $stmt = $db->prepare("SELECT watched_count, last_watched_at FROM movies WHERE user_id = ? AND tmdb_id = ?");
             $stmt->execute([$user->getId(), $tmdbId]);
-            $roll = $stmt->fetch() ?: ['watched_count' => 0, 'last_watched_at' => null];
+            $roll = $stmt->fetch();
+            $watchedCount = 0;
+            $lastWatchedAt = null;
+            if ($roll) {
+                $watchedCount = (int)($roll['watched_count'] ?? 0);
+                $lastWatchedAt = $roll['last_watched_at'] ?? null;
+            } else {
+                try {
+                    $agg = $db->prepare("SELECT COUNT(*) AS cnt, MAX(watched_at) AS last_at FROM watched_logs WHERE user_id = ? AND tmdb_id = ?");
+                    $agg->execute([$user->getId(), $tmdbId]);
+                    $r2 = $agg->fetch() ?: ['cnt' => 0, 'last_at' => null];
+                    $watchedCount = (int)($r2['cnt'] ?? 0);
+                    $lastWatchedAt = $r2['last_at'] ?? null;
+                } catch (\Throwable $e) {
+                    // keep defaults
+                }
+            }
             return $this->json([
                 'success' => (bool)$ok,
-                'watched_count' => (int)($roll['watched_count'] ?? 0),
-                'last_watched_at' => $roll['last_watched_at'] ?? null,
+                'watched_count' => $watchedCount,
+                'last_watched_at' => $lastWatchedAt,
                 'auto_removed_from_to_watch' => $autoRemoved,
             ], $ok ? 200 : 500);
         }
 
         return $this->redirect('/movies/' . $tmdbId);
+    }
+
+    /**
+     * Add a simple entry to the user's watchlog for the given TMDb movie id.
+     * This must NOT add or remove the movie from any collection/list.
+     * Accepts CSRF token and optional watched_at (defaults to now).
+     */
+    public function addToWatchlog(Request $request, array $params): Response
+    {
+        // Require login
+        $redirect = $this->requireLogin();
+        if ($redirect) {
+            return $redirect;
+        }
+
+        $user = SessionService::getCurrentUser();
+        $tmdbId = (int)($params['id'] ?? 0);
+        if ($tmdbId <= 0) {
+            return $this->json(['success' => false, 'error' => 'Invalid movie ID'], 400);
+        }
+
+        // CSRF token (from form field or header)
+        $token = $request->request->get('csrf_token') ?: $request->headers->get('X-CSRF-Token');
+        if (!$this->verifyCsrfToken($token)) {
+            return $this->json(['success' => false, 'error' => 'Invalid CSRF token'], 400);
+        }
+
+        // Optional fields can come via JSON or form
+        $meta = [];
+        $watchedAt = null;
+        $contentType = $request->headers->get('Content-Type') ?? '';
+        if (stripos($contentType, 'application/json') !== false) {
+            $payload = json_decode((string)$request->getContent(), true) ?: [];
+            if (!empty($payload['watched_at'])) {
+                try { $watchedAt = new \DateTimeImmutable((string)$payload['watched_at']); } catch (\Throwable $e) { $watchedAt = null; }
+            }
+            $meta['source'] = $payload['source'] ?? null;
+            $meta['format_id'] = isset($payload['format_id']) ? (int)$payload['format_id'] : null;
+            $meta['location'] = $payload['location'] ?? null;
+            $meta['runtime_minutes'] = isset($payload['runtime_minutes']) ? (int)$payload['runtime_minutes'] : null;
+            $meta['rating'] = isset($payload['rating']) ? (int)$payload['rating'] : null;
+            $meta['notes'] = $payload['notes'] ?? null;
+        } else {
+            $wa = $request->request->get('watched_at');
+            if (!empty($wa)) {
+                try { $watchedAt = new \DateTimeImmutable((string)$wa); } catch (\Throwable $e) { $watchedAt = null; }
+            }
+            $meta['source'] = $request->request->get('source');
+            $meta['format_id'] = $request->request->getInt('format_id') ?: null;
+            $meta['location'] = $request->request->get('location');
+            $meta['runtime_minutes'] = $request->request->getInt('runtime_minutes') ?: null;
+            $meta['rating'] = $request->request->getInt('rating') ?: null;
+            $meta['notes'] = $request->request->get('notes');
+        }
+
+        // Create a watchlog entry only. Do NOT add to any list/collection.
+        $ok = WatchedLog::create($user->getId(), $tmdbId, $watchedAt, $meta);
+
+        LoggerService::info('Add to Watchlog', [
+            'user_id' => $user->getId(),
+            'tmdb_id' => $tmdbId,
+            'success' => $ok ? 'yes' : 'no'
+        ]);
+
+        // Return updated roll-ups based on watched_logs aggregates (works even when no movies row exists)
+        $db = Database::getInstance();
+        $agg = ['cnt' => 0, 'last_at' => null];
+        try {
+            $stmt = $db->prepare("SELECT COUNT(*) AS cnt, MAX(watched_at) AS last_at FROM watched_logs WHERE user_id = ? AND tmdb_id = ?");
+            $stmt->execute([$user->getId(), $tmdbId]);
+            $agg = $stmt->fetch() ?: $agg;
+        } catch (\Throwable $e) {
+            // ignore
+        }
+
+        return $this->json([
+            'success' => (bool)$ok,
+            'watched_count' => (int)($agg['cnt'] ?? 0),
+            'last_watched_at' => $agg['last_at'] ?? null,
+        ]);
     }
 
     /**
@@ -1462,16 +1574,33 @@ class MovieController extends Controller
             return $this->json(['success' => false, 'error' => 'Failed to delete log'], 500);
         }
 
-        // Return updated roll-ups
+        // Return updated roll-ups (fallback to watched_logs if no movies row exists)
         $r = $db->prepare("SELECT watched_count, last_watched_at FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
         $r->execute([$user->getId(), $tmdbId]);
-        $roll = $r->fetch() ?: ['watched_count' => 0, 'last_watched_at' => null];
+        $roll = $r->fetch();
+        $watchedCount = 0;
+        $lastWatchedAt = null;
+
+        if ($roll) {
+            $watchedCount = (int)($roll['watched_count'] ?? 0);
+            $lastWatchedAt = $roll['last_watched_at'] ?? null;
+        } else {
+            try {
+                $agg = $db->prepare("SELECT COUNT(*) AS cnt, MAX(watched_at) AS last_at FROM watched_logs WHERE user_id = ? AND tmdb_id = ?");
+                $agg->execute([$user->getId(), $tmdbId]);
+                $row = $agg->fetch() ?: ['cnt' => 0, 'last_at' => null];
+                $watchedCount = (int)($row['cnt'] ?? 0);
+                $lastWatchedAt = $row['last_at'] ?? null;
+            } catch (\Throwable $e) {
+                // keep defaults
+            }
+        }
 
         return $this->json([
             'success' => true,
             'tmdb_id' => $tmdbId,
-            'watched_count' => (int)($roll['watched_count'] ?? 0),
-            'last_watched_at' => $roll['last_watched_at'] ?? null,
+            'watched_count' => $watchedCount,
+            'last_watched_at' => $lastWatchedAt,
         ]);
     }
 
@@ -1560,13 +1689,31 @@ class MovieController extends Controller
         $db = Database::getInstance();
         $r = $db->prepare("SELECT watched_count, last_watched_at FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
         $r->execute([$user->getId(), $tmdbId]);
-        $roll = $r->fetch() ?: ['watched_count' => 0, 'last_watched_at' => null];
+        $roll = $r->fetch();
+
+        $watchedCount = 0;
+        $lastWatchedAt = null;
+        if ($roll) {
+            $watchedCount = (int)($roll['watched_count'] ?? 0);
+            $lastWatchedAt = $roll['last_watched_at'] ?? null;
+        } else {
+            // Fallback to aggregates from watched_logs when movie isn't in any list
+            try {
+                $agg = $db->prepare("SELECT COUNT(*) AS cnt, MAX(watched_at) AS last_at FROM watched_logs WHERE user_id = ? AND tmdb_id = ?");
+                $agg->execute([$user->getId(), $tmdbId]);
+                $row = $agg->fetch() ?: ['cnt' => 0, 'last_at' => null];
+                $watchedCount = (int)($row['cnt'] ?? 0);
+                $lastWatchedAt = $row['last_at'] ?? null;
+            } catch (\Throwable $e) {
+                // keep defaults
+            }
+        }
 
         return $this->json([
             'success' => true,
             'tmdb_id' => $tmdbId,
-            'watched_count' => (int)($roll['watched_count'] ?? 0),
-            'last_watched_at' => $roll['last_watched_at'] ?? null,
+            'watched_count' => $watchedCount,
+            'last_watched_at' => $lastWatchedAt,
         ]);
     }
 

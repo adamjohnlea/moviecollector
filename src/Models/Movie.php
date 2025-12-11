@@ -158,6 +158,19 @@ class Movie
                 'title' => $title,
                 'tmdb_id' => $tmdbId
             ]);
+
+            // If this title already has watchlog history, initialize roll-ups
+            // so counters persist when the movie is later added to any list.
+            try {
+                WatchedLog::recomputeRollups($userId, $tmdbId);
+            } catch (\Throwable $e) {
+                // Non-fatal: if this fails, UI will still fall back to watched_logs
+                Logger::warning('Failed to recompute roll-ups after addToList', [
+                    'user_id' => $userId,
+                    'tmdb_id' => $tmdbId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
             
             return self::findById($movieId);
         } catch (\PDOException $e) {

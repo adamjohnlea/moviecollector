@@ -56,27 +56,47 @@ class HomeController extends Controller
                 try {
                     $logs = \App\Models\WatchedLog::getRecentByUser($user->getId(), 10);
                     foreach ($logs as $log) {
-                        // Load user's movie row to get title and local poster if present
+                        $tmdbId = (int)$log['tmdb_id'];
+                        // Load user's movie row if it exists (title/local poster)
                         $stmt = \App\Database\Database::getInstance()->prepare("SELECT * FROM movies WHERE user_id = ? AND tmdb_id = ? LIMIT 1");
-                        $stmt->execute([$user->getId(), (int)$log['tmdb_id']]);
-                        $row = $stmt->fetch();
-                        if (!$row) { continue; }
-                        $item = [
-                            'tmdb_id' => (int)$log['tmdb_id'],
-                            'watched_at' => $log['watched_at'],
-                            'title' => $row['title'] ?? 'Untitled',
-                        ];
-                        // Determine poster URL: prefer local_poster_path, else TMDb URL
+                        $stmt->execute([$user->getId(), $tmdbId]);
+                        $row = $stmt->fetch() ?: [];
+
+                        $title = $row['title'] ?? null;
+                        $posterUrl = null;
+
+                        // Prefer local poster if present
                         if (!empty($row['local_poster_path'])) {
-                            // Cache-bust with last_updated_at
                             $version = isset($row['last_updated_at']) ? rawurlencode((string)$row['last_updated_at']) : '';
-                            $item['poster_url'] = $row['local_poster_path'] . ($version ? ('?v=' . $version) : '');
+                            $posterUrl = $row['local_poster_path'] . ($version ? ('?v=' . $version) : '');
                         } elseif (!empty($row['poster_path'])) {
-                            $item['poster_url'] = $tmdbService->getImageUrl($row['poster_path'], 'w342');
-                        } else {
-                            $item['poster_url'] = null;
+                            $posterUrl = $tmdbService->getImageUrl($row['poster_path'], 'w342');
                         }
-                        $recentlyWatched[] = $item;
+
+                        // Fallback for items added directly to watchlog (no movie row yet) or missing data
+                        if ((!$title || !$posterUrl)) {
+                            try {
+                                $apiData = $tmdbService->getCompleteMovieDetails($tmdbId);
+                                if (!$title && isset($apiData['title'])) {
+                                    $title = $apiData['title'];
+                                }
+                                if (!$posterUrl && !empty($apiData['poster_path'])) {
+                                    $posterUrl = $tmdbService->getImageUrl($apiData['poster_path'], 'w342');
+                                }
+                            } catch (\Throwable $e) {
+                                Logger::warning('Failed TMDb fallback for Recently Watched item', [
+                                    'tmdb_id' => $tmdbId,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        }
+
+                        $recentlyWatched[] = [
+                            'tmdb_id' => $tmdbId,
+                            'watched_at' => $log['watched_at'],
+                            'title' => $title ?: 'Untitled',
+                            'poster_url' => $posterUrl,
+                        ];
                     }
                 } catch (\Throwable $e) {
                     Logger::error('Recently watched widget failed', ['error' => $e->getMessage()]);

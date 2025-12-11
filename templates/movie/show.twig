@@ -221,11 +221,14 @@
                         <div class="mt-4 border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
                             <div class="flex items-center justify-between mb-3">
                                 <div class="text-sm text-gray-600 dark:text-gray-400">
+                                    {% set local = movie.local_poster_path is defined ? movie.local_poster_path : null %}
+                                    {% set tmdbPath = movie.poster_path is defined ? movie.poster_path : null %}
+                                    {% set isUserUpload = local and (local matches '/^\\/uploads\\/posters\\/u\\d+_m\\d+_/') %}
                                     Poster source:
-                                    {% if movie.poster_url is defined and movie.poster_url and (movie.poster_url starts with '/uploads/') %}
+                                    {% if isUserUpload %}
                                         <span class="font-medium text-indigo-600">Your image</span>
-                                    {% elseif movie.poster_url %}
-                                        <span class="font-medium text-gray-800 dark:text-gray-200">TMDb</span>
+                                    {% elseif tmdbPath or (movie.poster_url is defined and movie.poster_url) %}
+                                        <span class="font-medium text-gray-800 dark:text-gray-200">TMDb Poster</span>
                                     {% else %}
                                         <span class="font-medium text-gray-800 dark:text-gray-200">None</span>
                                     {% endif %}
@@ -248,7 +251,7 @@
                                     <input id="keep_local_poster" name="keep_local_poster" type="checkbox" checked class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
                                     <label for="keep_local_poster" class="ml-2 block text-sm text-gray-700 dark:text-gray-300">Keep my uploaded poster</label>
                                 </div>
-                                <button type="submit" class="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium">Use TMDb poster</button>
+                                <button type="submit" class="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium">Refresh TMDb Data</button>
                             </form>
                         </div>
                         {% endif %}
@@ -307,30 +310,90 @@
                                     </form>
                                 </div>
                             {% else %}
-                                <div class="flex flex-col gap-4" 
+                                <div class="flex flex-col gap-4"
                                      x-data="{ 
-                                        submitting: false, 
+                                        submitting: false,
                                         selectedList: 'collection',
                                         message: null,
                                         messageType: null,
+                                        // interactive watchlog tools for non-collection items
+                                        count: {{ movie.watched_count|default(0) }},
+                                        lastAt: {{ movie.last_watched_at ? ('\'' ~ movie.last_watched_at ~ '\'') : 'null' }},
+                                        userTz: '{{ user_timezone }}',
+                                        busy: false,
+                                        addOpen: false,
+                                        form: { watched_at: '', source: '', format_id: '', rating: '', notes: '', location: '' },
+                                        fmt(ts){
+                                          if (!ts) return '';
+                                          const iso = ts.replace(' ', 'T') + 'Z';
+                                          const d = new Date(iso);
+                                          try {
+                                            return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: this.userTz }).format(d);
+                                          } catch (e) {
+                                            return d.toLocaleDateString();
+                                          }
+                                        },
+                                        async quickWatch() {
+                                          if (this.busy) return; this.busy = true;
+                                          try {
+                                            const res = await fetch('/movies/{{ movie.id }}/watchlog', { method: 'POST', headers: { 'X-CSRF-Token': '{{ csrf_token }}', 'Accept': 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                                            const data = await res.json();
+                                            if (data && data.success) {
+                                              this.count = data.watched_count ?? (this.count + 1);
+                                              this.lastAt = data.last_watched_at ?? this.lastAt;
+                                              window.dispatchEvent(new CustomEvent('watched-created', { detail: { tmdb_id: {{ movie.id }} } }));
+                                            } else { alert(data?.error || 'Failed to add to watchlog'); }
+                                          } catch(e) { console.error(e); alert('Network error'); }
+                                          finally { this.busy = false; }
+                                        },
+                                        async addWithDetails() {
+                                          if (this.busy) return; this.busy = true;
+                                          try {
+                                            const payload = { ...this.form };
+                                            Object.keys(payload).forEach(k => { if (payload[k] === '') payload[k] = null; });
+                                            const res = await fetch('/movies/{{ movie.id }}/watchlog', { method: 'POST', headers: { 'X-CSRF-Token': '{{ csrf_token }}', 'Accept': 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                                            const data = await res.json();
+                                            if (data && data.success) {
+                                              this.count = data.watched_count ?? (this.count + 1);
+                                              this.lastAt = data.last_watched_at ?? this.lastAt;
+                                              this.addOpen = false;
+                                              this.form = { watched_at: '', source: '', format_id: '', rating: '', notes: '', location: '' };
+                                              window.dispatchEvent(new CustomEvent('watched-created', { detail: { tmdb_id: {{ movie.id }} } }));
+                                            } else { alert(data?.error || 'Failed to add viewing'); }
+                                          } catch(e) { console.error(e); alert('Network error'); }
+                                          finally { this.busy = false; }
+                                        },
                                         async submitForm(event) {
                                             event.preventDefault();
                                             this.submitting = true;
                                             this.message = null;
-                                            
+
                                             try {
                                                 const form = event.target;
                                                 const formData = new FormData(form);
-                                                
-                                                const response = await fetch(form.action, {
+                                                // If user selected Watchlog, post to the dedicated endpoint
+                                                const actionUrl = this.selectedList === 'watchlog'
+                                                    ? '/movies/{{ movie.id }}/watchlog'
+                                                    : form.action;
+
+                                                const response = await fetch(actionUrl, {
                                                     method: 'POST',
                                                     body: formData
                                                 });
-                                                
+
                                                 const result = await response.json();
-                                                
+
                                                 if (result.success) {
-                                                    window.location.reload();
+                                                    if (this.selectedList === 'watchlog') {
+                                                      // update the summary live
+                                                      this.count = result.watched_count ?? (this.count + 1);
+                                                      this.lastAt = result.last_watched_at ?? this.lastAt;
+                                                      window.dispatchEvent(new CustomEvent('watched-created', { detail: { tmdb_id: {{ movie.id }} } }));
+                                                      this.submitting = false;
+                                                    } else {
+                                                      // Navigate refresh for adding to collection lists
+                                                      window.location.reload();
+                                                    }
                                                 } else {
                                                     this.message = result.error || 'An error occurred';
                                                     this.messageType = 'error';
@@ -344,11 +407,77 @@
                                             }
                                         }
                                      }">
+                                    <!-- Interactive watched summary + quick add tools for movies not yet in a list -->
+                                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                                        <div class="flex items-start justify-between">
+                                            <div>
+                                                <div class="text-sm text-gray-700 dark:text-gray-300">
+                                                    <span class="font-medium">Watched</span>
+                                                    <span class="ml-1 px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200" x-text="count"></span>
+                                                </div>
+                                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                    <template x-if="lastAt">
+                                                        <span>Last watched <span x-text="fmt(lastAt)"></span></span>
+                                                    </template>
+                                                    <template x-if="!lastAt">
+                                                        <span>Not watched yet</span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center gap-1">
+                                                <button @click="quickWatch()" :disabled="busy" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-md text-sm font-medium">Mark as watched</button>
+                                                <button @click="addOpen = !addOpen" :aria-expanded="addOpen" :disabled="busy" class="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-md text-sm" title="Add details">
+                                                    <!-- caret -->
+                                                    <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.114l3.71-3.884a.75.75 0 111.08 1.04l-4.24 4.44a.75.75 0 01-1.08 0l-4.24-4.44a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div x-show="addOpen" x-cloak class="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
+                                            <div class="grid grid-cols-1 gap-3">
+                                                <label class="text-sm">Date
+                                                    <input type="date" x-model="form.watched_at" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                </label>
+                                                <label class="text-sm">Source
+                                                    <input type="text" x-model="form.source" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                </label>
+                                                <label class="text-sm">Format
+                                                    <select x-model="form.format_id" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                        <option value="">N/A</option>
+                                                        {% if all_formats is defined and all_formats is not empty %}
+                                                            {% for category, formats in all_formats %}
+                                                                <optgroup label="{{ category }}">
+                                                                    {% for format in formats %}
+                                                                        <option value="{{ format.id }}">{{ format.name }}</option>
+                                                                    {% endfor %}
+                                                                </optgroup>
+                                                            {% endfor %}
+                                                        {% endif %}
+                                                    </select>
+                                                </label>
+                                                <div class="grid grid-cols-2 gap-3">
+                                                    <label class="text-sm">Rating (1–5)
+                                                        <input type="number" min="1" max="5" x-model="form.rating" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                    </label>
+                                                    <label class="text-sm">Location
+                                                        <input type="text" x-model="form.location" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                    </label>
+                                                </div>
+                                                <label class="text-sm">Notes
+                                                    <textarea x-model="form.notes" rows="2" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white"></textarea>
+                                                </label>
+                                                <div class="mt-2 flex justify-end gap-2">
+                                                    <button class="px-3 py-1.5 rounded bg-gray-200 dark:bg-gray-700" @click="addOpen = false">Cancel</button>
+                                                    <button class="px-3 py-1.5 rounded bg-indigo-600 text-white" @click="addWithDetails()">Save</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <select x-model="selectedList" 
                                             class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white">
                                         <option value="collection">Add to Owned Media</option>
                                         <option value="to_watch">Add to Watch List</option>
                                         <option value="to_buy">Add to Buy List</option>
+                                        <option value="watchlog">Add to Watchlog</option>
                                     </select>
                                     
                                     <form method="post" 
@@ -475,8 +604,7 @@
                             </div>
                             {% endif %}
 
-                            {# Viewing history section (only when movie is in user's app) #}
-                            {% if in_collection %}
+                            {# Viewing history section (now available regardless of list membership) #}
                             <div class="mb-6" x-data="{
                               items: [],
                               loaded: false,
@@ -671,8 +799,8 @@
                                     </div>
                                 </div>
                             </div>
-
-                            {% endif %}
+                            
+                            
 
                             <!-- Cast & Crew Section -->
                             {% if sections.cast_crew.loaded and (sections.cast_crew.visible is not defined or sections.cast_crew.visible) %}
@@ -751,6 +879,7 @@
                                     {% endif %}
                                 </div>
                             </div>
+                            
                             {% endif %}
                             
                             <!-- Similar Movies Section -->

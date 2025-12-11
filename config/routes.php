@@ -32,6 +32,7 @@ $router->post('/movies/search', [MovieController::class, 'search']);
 $router->get('/movies/{id}', [MovieController::class, 'show']);
 $router->post('/movies/{id}/add', [MovieController::class, 'addToList']);
 $router->post('/movies/{id}/remove', [MovieController::class, 'removeFromList']);
+$router->post('/movies/{id}/watchlog', [MovieController::class, 'addToWatchlog']);
 // Poster upload/replace (Owned Media)
 $router->post('/movies/{id}/poster', [MovieController::class, 'uploadPoster']);
 // Per-movie refresh from TMDb

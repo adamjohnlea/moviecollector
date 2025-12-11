@@ -180,7 +180,19 @@
                                         <input type="date" x-model="form.watched_at" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
                                     </label>
                                     <label class="text-sm">Source
-                                        <input type="text" x-model="form.source" placeholder="streaming / theater / owned_disc" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                        <select x-model="form.source" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                            <option value="">Select source…</option>
+                                            <option>Owned Media</option>
+                                            <option>Streaming - Owned</option>
+                                            <option>Streaming - Rental</option>
+                                            <option>Streaming - Free</option>
+                                            <option>Movie Theater</option>
+                                            <option>Cable/TV Broadcast</option>
+                                            <option>Library</option>
+                                            <option>In-Flight/Travel</option>
+                                            <option>Festival/Screening</option>
+                                            <option>Other - State in note</option>
+                                        </select>
                                     </label>
                                     <label class="text-sm">Format
                                         <select x-model="form.format_id" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
@@ -438,7 +450,19 @@
                                                     <input type="date" x-model="form.watched_at" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
                                                 </label>
                                                 <label class="text-sm">Source
-                                                    <input type="text" x-model="form.source" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                    <select x-model="form.source" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
+                                                        <option value="">Select source…</option>
+                                                        <option>Owned Media</option>
+                                                        <option>Streaming - Owned</option>
+                                                        <option>Streaming - Rental</option>
+                                                        <option>Streaming - Free</option>
+                                                        <option>Movie Theater</option>
+                                                        <option>Cable/TV Broadcast</option>
+                                                        <option>Library</option>
+                                                        <option>In-Flight/Travel</option>
+                                                        <option>Festival/Screening</option>
+                                                        <option>Other - State in note</option>
+                                                    </select>
                                                 </label>
                                                 <label class="text-sm">Format
                                                     <select x-model="form.format_id" class="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white">
